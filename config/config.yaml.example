@@ -1,0 +1,58 @@
+# Snowflake Key Pair Rotation - Configuration File
+# Copy this file to config.yaml and fill in your credentials
+
+# Snowflake Configuration
+snowflake:
+  # Snowflake account URL (e.g., 'your-account.snowflakecomputing.com')
+  account_url: "your_account.snowflakecomputing.com"
+  
+  # Admin credentials for connecting to Snowflake
+  # This user must have permission to ALTER USER for the target user
+  username: "admin_username"
+  password: "admin_password"
+  
+  # Optional: Warehouse and database to use for the connection
+  warehouse: "your_warehouse"
+  database: "your_database"
+  
+  # The user to set up key-pair authentication for
+  # This is typically the service account used by Hevo
+  user_to_modify: "hevo_service_user"
+
+# Hevo Data Configuration
+hevo:
+  # Hevo API base URL (varies by region)
+  # Examples:
+  #   - US: https://us.hevodata.com
+  #   - EU: https://eu.hevodata.com
+  #   - IN: https://in.hevodata.com
+  base_url: "https://us.hevodata.com"
+  
+  # Hevo account credentials for Basic Auth
+  username: "your_hevo_username"
+  password: "your_hevo_password"
+  
+  # Destination ID - leave empty for initial setup
+  # This will be populated after creating the destination
+  # Required for key rotation
+  destination_id: ""
+  
+  # Name for the Snowflake destination in Hevo
+  destination_name: "snowflake_destination"
+
+# Key Generation Configuration
+keys:
+  # Whether to encrypt the private key with a passphrase
+  # If true, you will be prompted for a passphrase
+  encrypted: false
+  
+  # Passphrase for encrypted keys (optional)
+  # If left empty and encrypted=true, passphrase will be prompted at runtime
+  # For security, it's recommended to leave this empty and enter at runtime
+  passphrase: ""
+  
+  # Directory to store generated keys
+  # Keys will be saved as:
+  #   - {output_directory}/rsa_key.p8 (private key)
+  #   - {output_directory}/rsa_key.pub (public key)
+  output_directory: "./keys"

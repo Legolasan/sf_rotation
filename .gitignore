@@ -1,0 +1,17 @@
+# Private keys
+keys/
+*.p8
+*.pem
+# Config with secrets
+config/config.yaml
+!config/config.yaml.example
+# Python
+__pycache__/
+*.pyc
+venv/
+# IDE & OS
+.idea/
+.vscode/
+.DS_Store
+*.log
+backups/

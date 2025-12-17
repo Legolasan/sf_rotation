@@ -1,0 +1,14 @@
+# Snowflake Key Pair Rotation - Python Dependencies
+
+# Snowflake connector for Python
+# Provides database connectivity and key-pair authentication
+snowflake-connector-python>=3.0.0
+
+# HTTP client for Hevo API calls
+requests>=2.28.0
+
+# YAML configuration file parsing
+PyYAML>=6.0
+
+# Note: cryptography package is included as a dependency of snowflake-connector-python
+# It provides key validation capabilities
