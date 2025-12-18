@@ -300,18 +300,57 @@ def run_rotate(config: dict, config_path: str, encrypted: bool = False) -> bool:
         sf_client.test_connection()
         print_success("Connected to Snowflake successfully")
         
-        # Step 4: Set RSA_PUBLIC_KEY_2 with new key
-        print_step(4, f"Setting RSA_PUBLIC_KEY_2 for user: {sf_config['user_to_modify']}")
+        # Step 4: Detect current key slot and set new key in the OTHER slot
+        print_step(4, f"Detecting current key slot for user: {sf_config['user_to_modify']}")
         
-        sf_client.set_rsa_public_key_2(
-            user=sf_config['user_to_modify'],
-            public_key=formatted_public_key
-        )
+        key_info = sf_client.get_user_public_keys(sf_config['user_to_modify'])
+        key1_set = key_info.get('RSA_PUBLIC_KEY_FP') is not None
+        key2_set = key_info.get('RSA_PUBLIC_KEY_2_FP') is not None
         
-        print_success("RSA_PUBLIC_KEY_2 set successfully (new key active)")
+        # Determine which slot has the OLD key and which slot to use for NEW key
+        if key1_set and not key2_set:
+            # Old key in slot 1 -> New key goes to slot 2
+            old_key_slot = 1
+            new_key_slot = 2
+            print_info("Current key is in RSA_PUBLIC_KEY (slot 1)")
+            print_info("New key will be set in RSA_PUBLIC_KEY_2 (slot 2)")
+        elif key2_set and not key1_set:
+            # Old key in slot 2 -> New key goes to slot 1
+            old_key_slot = 2
+            new_key_slot = 1
+            print_info("Current key is in RSA_PUBLIC_KEY_2 (slot 2)")
+            print_info("New key will be set in RSA_PUBLIC_KEY (slot 1)")
+        elif key1_set and key2_set:
+            # Both slots occupied - cannot rotate safely
+            print_error("Both RSA_PUBLIC_KEY and RSA_PUBLIC_KEY_2 are set!")
+            print_info("Cannot perform safe rotation. Please manually unset one key first:")
+            print_info("  ALTER USER <user> UNSET RSA_PUBLIC_KEY;")
+            print_info("  ALTER USER <user> UNSET RSA_PUBLIC_KEY_2;")
+            return False
+        else:
+            # No keys set - should use setup instead
+            print_error("No RSA public keys are currently set for this user.")
+            print_info("Run 'setup' or 'update-keys' first to configure key-pair authentication.")
+            return False
         
-        # Step 5: Update Hevo destination with new private key
-        print_step(5, f"Updating Hevo destination (ID: {destination_id}) with new private key")
+        # Set new key in the appropriate slot
+        print_step(5, f"Setting new key in RSA_PUBLIC_KEY{'_2' if new_key_slot == 2 else ''}")
+        
+        if new_key_slot == 2:
+            sf_client.set_rsa_public_key_2(
+                user=sf_config['user_to_modify'],
+                public_key=formatted_public_key
+            )
+        else:
+            sf_client.set_rsa_public_key(
+                user=sf_config['user_to_modify'],
+                public_key=formatted_public_key
+            )
+        
+        print_success(f"New key set in RSA_PUBLIC_KEY{'_2' if new_key_slot == 2 else ''} successfully")
+        
+        # Step 6: Update Hevo destination with new private key
+        print_step(6, f"Updating Hevo destination (ID: {destination_id}) with new private key")
         
         hevo_client = HevoClient(
             base_url=hevo_config['base_url'],
@@ -327,22 +366,26 @@ def run_rotate(config: dict, config_path: str, encrypted: bool = False) -> bool:
         
         print_success("Hevo destination updated with new private key")
         
-        # Step 6: Unset old RSA_PUBLIC_KEY
-        print_step(6, f"Unsetting old RSA_PUBLIC_KEY for user: {sf_config['user_to_modify']}")
+        # Step 7: Unset old key from the previous slot
+        old_key_name = f"RSA_PUBLIC_KEY{'_2' if old_key_slot == 2 else ''}"
+        print_step(7, f"Unsetting old {old_key_name} for user: {sf_config['user_to_modify']}")
         
-        if confirm_action("Confirm: Unset the old RSA_PUBLIC_KEY? (This completes the rotation)"):
-            sf_client.unset_rsa_public_key(sf_config['user_to_modify'])
-            print_success("Old RSA_PUBLIC_KEY unset successfully")
+        if confirm_action(f"Confirm: Unset the old {old_key_name}? (This completes the rotation)"):
+            if old_key_slot == 1:
+                sf_client.unset_rsa_public_key(sf_config['user_to_modify'])
+            else:
+                sf_client.unset_rsa_public_key_2(sf_config['user_to_modify'])
+            print_success(f"Old {old_key_name} unset successfully")
         else:
             print_warning("Skipped unsetting old key. You may need to do this manually later.")
-            print_info("Command: ALTER USER <user> UNSET RSA_PUBLIC_KEY;")
+            print_info(f"Command: ALTER USER <user> UNSET {old_key_name};")
         
         # Verify final state
         print_info("Verifying final key configuration...")
         sf_client.verify_key_setup(sf_config['user_to_modify'])
         
         # Rename new keys to standard names
-        print_step(7, "Finalizing key files")
+        print_step(8, "Finalizing key files")
         
         import shutil
         from pathlib import Path
