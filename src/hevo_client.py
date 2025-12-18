@@ -127,6 +127,7 @@ class HevoClient:
             config["private_key_passphrase"] = private_key_passphrase
         
         payload = {
+            "destination_type": "SNOWFLAKE",
             "config": config,
             "connector_id": connector_id,
             "name": name
