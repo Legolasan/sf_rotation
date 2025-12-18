@@ -6,6 +6,8 @@ Main orchestrator script for setting up and rotating Snowflake key-pair
 authentication with Hevo Data destinations.
 
 Usage:
+    sf-rotation --help                                   # Show all commands
+    sf-rotation setup --help                             # Setup command help
     sf-rotation setup --config config/config.yaml        # New destination
     sf-rotation update-keys --config config/config.yaml  # Existing destination
     sf-rotation rotate --config config/config.yaml       # Key rotation
@@ -606,48 +608,149 @@ def run_update_keys(config: dict, config_path: str, encrypted: bool = False) -> 
 def main():
     """Main entry point."""
     parser = argparse.ArgumentParser(
-        description="Snowflake Key Pair Rotation Tool",
+        prog='sf-rotation',
+        description='''
+Snowflake Key Pair Rotation Tool
+
+Automates Snowflake key-pair authentication setup and rotation 
+with Hevo Data destinations.
+        ''',
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
-Examples:
-  Initial setup (creates new Hevo destination):
-    sf-rotation setup --config config/config.yaml
+        epilog='''
+COMMANDS:
+  setup        Create new keys and NEW Hevo destination
+  update-keys  Create new keys for EXISTING Hevo destination  
+  rotate       Rotate keys (can run multiple times)
 
-  Update keys for existing destination:
-    sf-rotation update-keys --config config/config.yaml
+QUICK START:
+  1. Install:     pip install sf-rotation
+  2. Config:      Create config/config.yaml with your credentials
+  3. Run:         sf-rotation setup --config config/config.yaml
 
-  Key rotation:
-    sf-rotation rotate --config config/config.yaml
+For command-specific help:
+  sf-rotation setup --help
+  sf-rotation update-keys --help
+  sf-rotation rotate --help
 
-  With encrypted keys:
-    sf-rotation setup --config config/config.yaml --encrypted
-        """
+Documentation: https://github.com/Legolasan/sf_rotation
+        '''
     )
     
-    parser.add_argument(
-        'command',
-        choices=['setup', 'rotate', 'update-keys'],
-        help="Command: 'setup' (new destination), 'update-keys' (existing destination), 'rotate' (rotate keys)"
+    subparsers = parser.add_subparsers(dest='command', required=True)
+    
+    # Setup subcommand
+    setup_parser = subparsers.add_parser(
+        'setup',
+        help='Initial setup - creates new Hevo destination',
+        description='''
+SETUP - Initial Key Pair Configuration
+
+Use this when you want to CREATE A NEW Hevo destination with 
+key-pair authentication.
+
+WHAT IT DOES:
+  1. Generates RSA key pair (saves to ./keys/)
+  2. Connects to Snowflake with admin credentials
+  3. Sets RSA_PUBLIC_KEY for target user
+  4. Creates NEW Hevo destination via API
+  5. Auto-saves destination_id to config file
+
+PREREQUISITES:
+  - Snowflake admin credentials (to ALTER USER)
+  - Hevo API credentials
+  - OpenSSL installed
+        ''',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog='''
+EXAMPLES:
+  sf-rotation setup --config config/config.yaml
+  sf-rotation setup --config config/config.yaml --encrypted
+        '''
     )
     
-    parser.add_argument(
-        '--config', '-c',
-        required=True,
-        help="Path to configuration YAML file"
+    # Update-keys subcommand
+    update_parser = subparsers.add_parser(
+        'update-keys',
+        help='Update keys for existing Hevo destination',
+        description='''
+UPDATE-KEYS - Configure Existing Hevo Destination
+
+Use this when you ALREADY HAVE a Hevo destination (created via 
+Hevo UI or API) and want to configure key-pair authentication.
+
+WHAT IT DOES:
+  1. Generates RSA key pair (saves to ./keys/)
+  2. Connects to Snowflake with admin credentials
+  3. Sets RSA_PUBLIC_KEY for target user
+  4. Updates EXISTING Hevo destination via API
+
+PREREQUISITES:
+  - destination_id must be set in config file
+  - Find it: Hevo Dashboard > Destinations > URL contains ID
+        ''',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog='''
+EXAMPLES:
+  sf-rotation update-keys --config config/config.yaml
+  sf-rotation update-keys --config config/config.yaml --encrypted
+        '''
     )
     
-    parser.add_argument(
-        '--encrypted', '-e',
-        action='store_true',
-        help="Use encrypted private key (passphrase will be prompted)"
+    # Rotate subcommand
+    rotate_parser = subparsers.add_parser(
+        'rotate',
+        help='Rotate keys with zero-downtime (repeatable)',
+        description='''
+ROTATE - Zero-Downtime Key Rotation
+
+Use this for ONGOING KEY ROTATIONS. Can be run MULTIPLE TIMES 
+without conflicts - automatically alternates between key slots.
+
+WHAT IT DOES:
+  1. Backs up current keys to ./keys/backups/
+  2. Generates new RSA key pair
+  3. Detects current key slot (RSA_PUBLIC_KEY or RSA_PUBLIC_KEY_2)
+  4. Sets new key in the OTHER slot (zero-downtime)
+  5. Updates Hevo destination with new private key
+  6. Unsets the old key slot (after confirmation)
+
+KEY SLOT ALTERNATION:
+  Rotate 1: Slot 1 -> Slot 2
+  Rotate 2: Slot 2 -> Slot 1
+  Rotate 3: Slot 1 -> Slot 2
+  ...repeats forever
+
+PREREQUISITES:
+  - Must have run 'setup' or 'update-keys' first
+  - destination_id must be set in config file
+        ''',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog='''
+EXAMPLES:
+  sf-rotation rotate --config config/config.yaml
+  sf-rotation rotate --config config/config.yaml --encrypted
+        '''
     )
     
-    parser.add_argument(
-        '--log-level',
-        choices=['DEBUG', 'INFO', 'WARNING', 'ERROR'],
-        default='INFO',
-        help="Logging level (default: INFO)"
-    )
+    # Add common arguments to each subparser
+    for subparser in [setup_parser, update_parser, rotate_parser]:
+        subparser.add_argument(
+            '--config', '-c',
+            required=True,
+            metavar='PATH',
+            help='Path to configuration YAML file'
+        )
+        subparser.add_argument(
+            '--encrypted', '-e',
+            action='store_true',
+            help='Use encrypted private key (passphrase prompted at runtime)'
+        )
+        subparser.add_argument(
+            '--log-level',
+            choices=['DEBUG', 'INFO', 'WARNING', 'ERROR'],
+            default='INFO',
+            help='Logging level (default: INFO)'
+        )
     
     args = parser.parse_args()
     
