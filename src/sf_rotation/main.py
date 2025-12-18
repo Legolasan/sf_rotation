@@ -66,6 +66,23 @@ def run_setup(config: dict, config_path: str, encrypted: bool = False) -> bool:
     hevo_config = config['hevo']
     keys_config = config['keys']
     
+    # Check if destination already exists in config
+    existing_destination_id = hevo_config.get('destination_id')
+    if existing_destination_id and str(existing_destination_id).strip():
+        print_warning(f"A destination_id ({existing_destination_id}) already exists in your config!")
+        print_info("This means you already have a Hevo destination configured.")
+        print_info("")
+        print_info("Recommended actions:")
+        print_info("  - To rotate keys: sf-rotation rotate --config <config>")
+        print_info("  - To update existing destination: sf-rotation update-keys --config <config>")
+        print_info("")
+        
+        if not confirm_action("Do you want to CREATE A NEW destination anyway? (This will replace the existing destination_id in config)"):
+            print_info("Setup cancelled. Use 'rotate' or 'update-keys' for existing destinations.")
+            return False
+        
+        print_warning("Proceeding to create NEW destination...")
+    
     keys_dir = keys_config.get('output_directory', './keys')
     passphrase = None
     
