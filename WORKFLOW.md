@@ -7,50 +7,126 @@ This document explains how the Snowflake Key Pair Rotation tool works step by st
 The tool has three modes:
 - **Setup** - Initial configuration with new Hevo destination
 - **Update-Keys** - Update keys for existing Hevo destination  
-- **Rotate** - Zero-downtime key rotation
+- **Rotate** - Zero-downtime key rotation (can run multiple times)
 
 ---
 
 ## Installation
 
-### Option 1: Install from PyPI (Recommended)
-
 ```bash
 pip install sf-rotation
 ```
 
-### Option 2: Install from GitHub
-
+**Alternative installation methods:**
 ```bash
+# From GitHub
 pip install git+https://github.com/Legolasan/sf_rotation.git
-```
 
-### Option 3: Install from Source
-
-```bash
-git clone https://github.com/Legolasan/sf_rotation.git
-cd sf_rotation
-pip install .
+# From source
+git clone https://github.com/Legolasan/sf_rotation.git && cd sf_rotation && pip install .
 ```
 
 ---
 
-## Quick Start
+# Step-by-Step Guides
 
-### Step 1: Install the Package
+## Scenario 1: Setup - New Hevo Destination
+
+Use this when you want to **create a new Hevo destination** with key-pair authentication.
+
+### Step 1: Install the tool
 
 ```bash
 pip install sf-rotation
 ```
 
-### Step 2: Create Configuration File
+### Step 2: Create a directory for your project
+
+```bash
+mkdir my-snowflake-rotation
+cd my-snowflake-rotation
+```
+
+### Step 3: Create configuration file
 
 ```bash
 mkdir -p config
-curl -o config/config.yaml https://raw.githubusercontent.com/Legolasan/sf_rotation/main/config/config.yaml.example
 ```
 
-Or manually create `config/config.yaml`:
+Create `config/config.yaml` with your credentials:
+
+```yaml
+snowflake:
+  account_url: "your_account.snowflakecomputing.com"
+  username: "admin_username"          # Admin user with ALTER USER permission
+  password: "admin_password"
+  warehouse: "your_warehouse"
+  database: "your_database"
+  user_to_modify: "hevo_service_user" # The user Hevo will use to connect
+
+hevo:
+  base_url: "https://us.hevodata.com" # or your Hevo region URL
+  username: "your_hevo_username"
+  password: "your_hevo_password"
+  destination_id: ""                  # Leave empty for setup
+  destination_name: "snowflake_destination"
+
+keys:
+  encrypted: false                    # Set true for encrypted private key
+  passphrase: ""                      # Leave empty to be prompted
+  output_directory: "./keys"
+```
+
+### Step 4: Run setup
+
+```bash
+sf-rotation setup --config config/config.yaml
+```
+
+**For encrypted private key:**
+```bash
+sf-rotation setup --config config/config.yaml --encrypted
+```
+
+### What happens:
+1. ✅ Generates RSA key pair → saves to `./keys/rsa_key.p8` and `./keys/rsa_key.pub`
+2. ✅ Connects to Snowflake with admin credentials
+3. ✅ Sets `RSA_PUBLIC_KEY` for `user_to_modify`
+4. ✅ Creates Hevo destination via API
+5. ✅ **Auto-saves `destination_id` to config file** (for future rotations)
+
+---
+
+## Scenario 2: Update-Keys - Existing Hevo Destination
+
+Use this when you **already have a Hevo destination** (created via UI or API) and want to configure key-pair authentication.
+
+### Step 1: Install the tool
+
+```bash
+pip install sf-rotation
+```
+
+### Step 2: Create a directory for your project
+
+```bash
+mkdir my-snowflake-rotation
+cd my-snowflake-rotation
+```
+
+### Step 3: Get your Hevo destination ID
+
+Find your destination ID from:
+- Hevo Dashboard → Destinations → Your Destination → URL contains the ID
+- Or use Hevo API: `GET /api/v1/destinations`
+
+### Step 4: Create configuration file
+
+```bash
+mkdir -p config
+```
+
+Create `config/config.yaml` with your credentials:
 
 ```yaml
 snowflake:
@@ -65,7 +141,7 @@ hevo:
   base_url: "https://us.hevodata.com"
   username: "your_hevo_username"
   password: "your_hevo_password"
-  destination_id: ""
+  destination_id: "123456"             # ⬅️ YOUR EXISTING DESTINATION ID
   destination_name: "snowflake_destination"
 
 keys:
@@ -74,24 +150,85 @@ keys:
   output_directory: "./keys"
 ```
 
-### Step 3: Choose Your Scenario
+### Step 5: Run update-keys
 
-**Option A: New Hevo Destination**
-```bash
-sf-rotation setup --config config/config.yaml
-```
-This creates a new destination and auto-saves `destination_id` to your config.
-
-**Option B: Existing Hevo Destination**
-Add your `destination_id` to config, then:
 ```bash
 sf-rotation update-keys --config config/config.yaml
 ```
 
-### Step 4: Run Key Rotation (when needed)
+**For encrypted private key:**
+```bash
+sf-rotation update-keys --config config/config.yaml --encrypted
+```
+
+### What happens:
+1. ✅ Verifies `destination_id` exists in config
+2. ✅ Generates RSA key pair → saves to `./keys/`
+3. ✅ Connects to Snowflake with admin credentials
+4. ✅ Sets `RSA_PUBLIC_KEY` (or `RSA_PUBLIC_KEY_2` if slot 1 is occupied)
+5. ✅ **Updates existing Hevo destination** (does NOT create new)
+
+---
+
+## Scenario 3: Rotate - Key Rotation (Repeatable)
+
+Use this for **ongoing key rotations**. Can be run **multiple times** without conflicts.
+
+### Prerequisites
+- You've already run `setup` or `update-keys` successfully
+- `destination_id` is set in your config file
+
+### Step 1: Run rotation
 
 ```bash
 sf-rotation rotate --config config/config.yaml
+```
+
+**For encrypted private key:**
+```bash
+sf-rotation rotate --config config/config.yaml --encrypted
+```
+
+### What happens:
+1. ✅ Backs up current keys to `./keys/backups/<timestamp>/`
+2. ✅ Generates new RSA key pair
+3. ✅ Connects to Snowflake
+4. ✅ **Detects current key slot** (RSA_PUBLIC_KEY or RSA_PUBLIC_KEY_2)
+5. ✅ **Sets new key in the OTHER slot** (zero-downtime - both keys valid)
+6. ✅ Updates Hevo destination with new private key
+7. ✅ **Unsets the OLD key slot** (after confirmation)
+8. ✅ Renames new keys to standard names
+
+### Key Slot Alternation (Multiple Rotations)
+
+The tool automatically alternates between key slots:
+
+| Run | Current Key Slot | New Key Slot | After Rotation |
+|-----|-----------------|--------------|----------------|
+| Setup | - | Slot 1 | Key A in Slot 1 |
+| Rotate 1 | Slot 1 | Slot 2 | Key B in Slot 2 |
+| Rotate 2 | Slot 2 | Slot 1 | Key C in Slot 1 |
+| Rotate 3 | Slot 1 | Slot 2 | Key D in Slot 2 |
+| ...and so on | Alternates | Alternates | ✅ No conflicts |
+
+---
+
+# Quick Reference
+
+## Commands
+
+| Command | When to Use | Creates Destination? |
+|---------|-------------|---------------------|
+| `sf-rotation setup --config config.yaml` | First time, new Hevo destination | ✅ Yes |
+| `sf-rotation update-keys --config config.yaml` | First time, existing Hevo destination | ❌ No |
+| `sf-rotation rotate --config config.yaml` | Ongoing key rotation | ❌ No |
+
+## Add `--encrypted` for password-protected keys
+
+```bash
+sf-rotation setup --config config.yaml --encrypted
+sf-rotation update-keys --config config.yaml --encrypted
+sf-rotation rotate --config config.yaml --encrypted
 ```
 
 ---
@@ -161,7 +298,7 @@ hevo:
 
 ## Rotate Mode (`sf-rotation rotate`)
 
-This is for rotating existing keys:
+This is for rotating existing keys. **Can be run multiple times without conflicts.**
 
 ### Step 1: Backup Existing Keys
 - Copies current keys from `./keys/` to `./keys/backups/<timestamp>/`
@@ -172,23 +309,40 @@ This is for rotating existing keys:
 ### Step 3: Connect to Snowflake
 - Same admin connection as setup
 
-### Step 4: Set RSA_PUBLIC_KEY_2 (New Key)
-- Executes: `ALTER USER <target_user> SET RSA_PUBLIC_KEY_2='<new_key>'`
-- **Both keys are now active** - Snowflake accepts either
+### Step 4: Detect Current Key Slot
+- Queries Snowflake to check which slot has the active key:
+  - `RSA_PUBLIC_KEY_FP` (slot 1)
+  - `RSA_PUBLIC_KEY_2_FP` (slot 2)
+- Determines the **other slot** for the new key
 
-### Step 5: Update Hevo Destination
+### Step 5: Set New Key in Alternate Slot
+- If current key is in slot 1 → `ALTER USER SET RSA_PUBLIC_KEY_2='<new_key>'`
+- If current key is in slot 2 → `ALTER USER SET RSA_PUBLIC_KEY='<new_key>'`
+- **Both keys are now active** - Snowflake accepts either (zero-downtime)
+
+### Step 6: Update Hevo Destination
 - Calls Hevo API: `PATCH /api/v1/destinations/<destination_id>`
 - Updates with new private key
 - Hevo now uses the new key to authenticate
 
-### Step 6: Unset Old RSA_PUBLIC_KEY
+### Step 7: Unset Old Key Slot
 - Prompts for confirmation
-- Executes: `ALTER USER <target_user> UNSET RSA_PUBLIC_KEY`
+- If old key was in slot 1 → `ALTER USER UNSET RSA_PUBLIC_KEY`
+- If old key was in slot 2 → `ALTER USER UNSET RSA_PUBLIC_KEY_2`
 - Old key is now invalid
 
-### Step 7: Finalize
+### Step 8: Finalize
 - Renames `new_rsa_key.p8` to `rsa_key.p8`
 - Renames `new_rsa_key.pub` to `rsa_key.pub`
+
+### Why Alternating Slots?
+This ensures rotation can run **indefinitely** without conflicts:
+```
+Rotate 1: Slot 1 → Slot 2 → Unset Slot 1
+Rotate 2: Slot 2 → Slot 1 → Unset Slot 2
+Rotate 3: Slot 1 → Slot 2 → Unset Slot 1
+...repeats forever
+```
 
 ---
 
@@ -276,7 +430,7 @@ python -m sf_rotation rotate --config config/config.yaml
 
 ┌─────────────────────────────────────────────────────────────────┐
 │                       ROTATE MODE                               │
-│                   (Zero-Downtime Rotation)                      │
+│            (Zero-Downtime, Repeatable Rotation)                 │
 ├─────────────────────────────────────────────────────────────────┤
 │  [Backup] ──► Old keys saved to backups/                        │
 │       │                                                         │
@@ -284,20 +438,40 @@ python -m sf_rotation rotate --config config/config.yaml
 │  [OpenSSL] ──► New Private Key + Public Key                     │
 │       │                                                         │
 │       ▼                                                         │
-│  [Snowflake] ◄── ALTER USER SET RSA_PUBLIC_KEY_2 (new)          │
-│       │         (both keys now valid)                           │
+│  [Snowflake] ──► Detect current key slot (1 or 2)               │
+│       │                                                         │
+│       ▼                                                         │
+│  [Snowflake] ◄── SET new key in OTHER slot                      │
+│       │         (both keys now valid - zero downtime)           │
 │       ▼                                                         │
 │  [Hevo API] ◄── PATCH /destinations (new private key)           │
 │       │                                                         │
 │       ▼                                                         │
-│  [Snowflake] ◄── ALTER USER UNSET RSA_PUBLIC_KEY (old)          │
+│  [Snowflake] ◄── UNSET old key slot                             │
 │                  (only new key valid now)                       │
+└─────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────┐
+│                  ROTATION KEY SLOT FLOW                         │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  After Setup:    [Slot 1: Key A]  [Slot 2: Empty]               │
+│                        │                                        │
+│  Rotate #1:      [Slot 1: Empty]  [Slot 2: Key B] ←── new       │
+│                        │                                        │
+│  Rotate #2:      [Slot 1: Key C]  [Slot 2: Empty] ←── new       │
+│                        │                                        │
+│  Rotate #3:      [Slot 1: Empty]  [Slot 2: Key D] ←── new       │
+│                        │                                        │
+│                  ...alternates forever...                       │
+│                                                                 │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
 ## Key Insight
 
-During rotation, **both keys are temporarily valid** (RSA_PUBLIC_KEY and RSA_PUBLIC_KEY_2), which ensures zero downtime while Hevo switches to the new key.
+- During rotation, **both keys are temporarily valid** (RSA_PUBLIC_KEY and RSA_PUBLIC_KEY_2), ensuring zero downtime while Hevo switches to the new key.
+- The rotation **alternates between slots**, allowing you to run it **unlimited times** without conflicts.
 
 ---
 

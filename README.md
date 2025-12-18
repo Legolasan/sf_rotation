@@ -75,7 +75,9 @@ sf-rotation setup --config config/config.yaml --encrypted
 |---------|-------------|---------------------------|
 | `setup` | Initial setup - creates new Hevo destination | Yes |
 | `update-keys` | Update keys for existing Hevo destination | No (requires `destination_id`) |
-| `rotate` | Rotate keys with zero-downtime | No (requires `destination_id`) |
+| `rotate` | Rotate keys with zero-downtime (repeatable) | No (requires `destination_id`) |
+
+> **Tip**: Run `rotate` as many times as needed - it automatically alternates between Snowflake key slots.
 
 ### As Python Module
 
@@ -148,12 +150,15 @@ hevo.create_destination(
 3. Connect to Snowflake and set public key
 4. Update existing Hevo destination with private key
 
-### Rotate Mode (Key Rotation)
+### Rotate Mode (Key Rotation - Repeatable)
 1. Backup existing keys
 2. Generate new key pair
-3. Set `RSA_PUBLIC_KEY_2` in Snowflake
-4. Update Hevo destination with new private key
-5. Unset old `RSA_PUBLIC_KEY`
+3. **Detect current key slot** (RSA_PUBLIC_KEY or RSA_PUBLIC_KEY_2)
+4. Set new key in the **alternate slot** (zero-downtime)
+5. Update Hevo destination with new private key
+6. Unset the **old key slot**
+
+> **Note**: Rotation alternates between slots, allowing unlimited rotations without conflicts.
 
 ## Project Structure
 
