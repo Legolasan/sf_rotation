@@ -4,7 +4,10 @@ This document explains how the Snowflake Key Pair Rotation tool works step by st
 
 ## Overview
 
-The tool has two modes: **Setup** (initial configuration) and **Rotate** (key rotation).
+The tool has three modes:
+- **Setup** - Initial configuration with new Hevo destination
+- **Update-Keys** - Update keys for existing Hevo destination  
+- **Rotate** - Zero-downtime key rotation
 
 ---
 
@@ -71,10 +74,18 @@ keys:
   output_directory: "./keys"
 ```
 
-### Step 3: Run Initial Setup
+### Step 3: Choose Your Scenario
 
+**Option A: New Hevo Destination**
 ```bash
 sf-rotation setup --config config/config.yaml
+```
+This creates a new destination and auto-saves `destination_id` to your config.
+
+**Option B: Existing Hevo Destination**
+Add your `destination_id` to config, then:
+```bash
+sf-rotation update-keys --config config/config.yaml
 ```
 
 ### Step 4: Run Key Rotation (when needed)
@@ -109,9 +120,42 @@ This is for first-time key pair configuration:
 - Sends the private key content with `authentication_type: "PRIVATE_KEY"`
 - Uses Basic Auth (username/password)
 
-### Step 5: Save Destination ID
+### Step 5: Auto-Save Destination ID
 - Extracts `destination_id` from API response
-- User saves this ID in config for future rotations
+- **Automatically saves** to config file for future rotations
+
+---
+
+## Update-Keys Mode (`sf-rotation update-keys`)
+
+Use this when you **already have a Hevo destination** (created via Hevo UI or API) and want to configure key-pair authentication:
+
+### Prerequisites
+- Add `destination_id` to your config file:
+```yaml
+hevo:
+  destination_id: "your_existing_destination_id"
+```
+
+### Step 1: Verify Destination ID
+- Checks that `destination_id` exists in config
+- Displays helpful error if missing
+
+### Step 2: Generate RSA Key Pair
+- Same as setup mode
+- Backs up existing keys if present
+
+### Step 3: Connect to Snowflake
+- Uses admin credentials to connect
+
+### Step 4: Set RSA Public Key
+- Checks available key slot (RSA_PUBLIC_KEY or RSA_PUBLIC_KEY_2)
+- Sets the public key for the target user
+
+### Step 5: Update Hevo Destination
+- Calls Hevo API: `PATCH /api/v1/destinations/<destination_id>`
+- Updates with new private key
+- Does NOT create a new destination
 
 ---
 
@@ -152,10 +196,11 @@ This is for rotating existing keys:
 
 ### Available Commands
 
-| Command | Description |
-|---------|-------------|
-| `sf-rotation setup --config <path>` | Initial key pair setup |
-| `sf-rotation rotate --config <path>` | Rotate existing keys |
+| Command | Description | Creates Destination? |
+|---------|-------------|---------------------|
+| `sf-rotation setup --config <path>` | Initial setup - new Hevo destination | Yes |
+| `sf-rotation update-keys --config <path>` | Update keys - existing destination | No |
+| `sf-rotation rotate --config <path>` | Rotate keys - zero downtime | No |
 
 ### Options
 
@@ -168,14 +213,17 @@ This is for rotating existing keys:
 ### Examples
 
 ```bash
-# Initial setup with non-encrypted key
+# Initial setup - creates new Hevo destination
 sf-rotation setup --config config/config.yaml
 
-# Initial setup with encrypted key
-sf-rotation setup --config config/config.yaml --encrypted
+# Update keys for existing destination
+sf-rotation update-keys --config config/config.yaml
 
-# Key rotation
+# Key rotation with zero downtime
 sf-rotation rotate --config config/config.yaml
+
+# With encrypted key
+sf-rotation setup --config config/config.yaml --encrypted
 
 # With debug logging
 sf-rotation setup --config config/config.yaml --log-level DEBUG
@@ -185,6 +233,7 @@ sf-rotation setup --config config/config.yaml --log-level DEBUG
 
 ```bash
 python -m sf_rotation setup --config config/config.yaml
+python -m sf_rotation update-keys --config config/config.yaml
 python -m sf_rotation rotate --config config/config.yaml
 ```
 
@@ -195,6 +244,7 @@ python -m sf_rotation rotate --config config/config.yaml
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │                        SETUP MODE                               │
+│                   (New Hevo Destination)                        │
 ├─────────────────────────────────────────────────────────────────┤
 │  [OpenSSL] ──► Private Key + Public Key                         │
 │       │                                                         │
@@ -202,11 +252,31 @@ python -m sf_rotation rotate --config config/config.yaml
 │  [Snowflake] ◄── ALTER USER SET RSA_PUBLIC_KEY                  │
 │       │                                                         │
 │       ▼                                                         │
-│  [Hevo API] ◄── POST /destinations (with private key)           │
+│  [Hevo API] ◄── POST /destinations (creates new)                │
+│       │                                                         │
+│       ▼                                                         │
+│  [Config] ◄── Auto-save destination_id                          │
+└─────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────┐
+│                     UPDATE-KEYS MODE                            │
+│                 (Existing Hevo Destination)                     │
+├─────────────────────────────────────────────────────────────────┤
+│  [Config] ──► Verify destination_id exists                      │
+│       │                                                         │
+│       ▼                                                         │
+│  [OpenSSL] ──► Private Key + Public Key                         │
+│       │                                                         │
+│       ▼                                                         │
+│  [Snowflake] ◄── ALTER USER SET RSA_PUBLIC_KEY                  │
+│       │                                                         │
+│       ▼                                                         │
+│  [Hevo API] ◄── PATCH /destinations (update existing)           │
 └─────────────────────────────────────────────────────────────────┘
 
 ┌─────────────────────────────────────────────────────────────────┐
 │                       ROTATE MODE                               │
+│                   (Zero-Downtime Rotation)                      │
 ├─────────────────────────────────────────────────────────────────┤
 │  [Backup] ──► Old keys saved to backups/                        │
 │       │                                                         │
@@ -250,9 +320,9 @@ You can also use the package programmatically in your Python code:
 ```python
 from sf_rotation import KeyGenerator, SnowflakeClient, HevoClient
 
-# Generate keys
+# Generate keys (returns: private_key_path, public_key_path, backup_path)
 generator = KeyGenerator(output_directory="./keys")
-private_key_path, public_key_path = generator.generate_key_pair(
+private_key_path, public_key_path, backup_path = generator.generate_key_pair(
     key_name="rsa_key",
     encrypted=False
 )

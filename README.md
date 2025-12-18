@@ -56,15 +56,26 @@ curl -o config/config.yaml https://raw.githubusercontent.com/Legolasan/sf_rotati
 After installation, the `sf-rotation` command is available:
 
 ```bash
-# Initial setup
+# Initial setup (creates new Hevo destination, saves destination_id to config)
 sf-rotation setup --config config/config.yaml
 
-# Key rotation
+# Update keys for existing destination (requires destination_id in config)
+sf-rotation update-keys --config config/config.yaml
+
+# Key rotation (for ongoing key rotations)
 sf-rotation rotate --config config/config.yaml
 
 # With encrypted private key
 sf-rotation setup --config config/config.yaml --encrypted
 ```
+
+### Commands Overview
+
+| Command | Description | Creates Hevo Destination? |
+|---------|-------------|---------------------------|
+| `setup` | Initial setup - creates new Hevo destination | Yes |
+| `update-keys` | Update keys for existing Hevo destination | No (requires `destination_id`) |
+| `rotate` | Rotate keys with zero-downtime | No (requires `destination_id`) |
 
 ### As Python Module
 
@@ -78,9 +89,9 @@ python -m sf_rotation rotate --config config/config.yaml
 ```python
 from sf_rotation import KeyGenerator, SnowflakeClient, HevoClient
 
-# Generate keys
+# Generate keys (returns: private_key_path, public_key_path, backup_path)
 generator = KeyGenerator(output_directory="./keys")
-private_key_path, public_key_path = generator.generate_key_pair(
+private_key_path, public_key_path, backup_path = generator.generate_key_pair(
     key_name="rsa_key",
     encrypted=False
 )
@@ -124,14 +135,20 @@ hevo.create_destination(
 
 ## Process Flow
 
-### Setup Mode
+### Setup Mode (New Destination)
 1. Generate RSA key pair
 2. Connect to Snowflake (username/password)
 3. Set `RSA_PUBLIC_KEY` for target user
 4. Create Hevo destination with private key
-5. Save destination ID
+5. Auto-save `destination_id` to config file
 
-### Rotate Mode
+### Update-Keys Mode (Existing Destination)
+1. Verify `destination_id` exists in config
+2. Generate RSA key pair
+3. Connect to Snowflake and set public key
+4. Update existing Hevo destination with private key
+
+### Rotate Mode (Key Rotation)
 1. Backup existing keys
 2. Generate new key pair
 3. Set `RSA_PUBLIC_KEY_2` in Snowflake

@@ -6,9 +6,10 @@ Main orchestrator script for setting up and rotating Snowflake key-pair
 authentication with Hevo Data destinations.
 
 Usage:
-    python main.py setup --config config/config.yaml
-    python main.py rotate --config config/config.yaml
-    python main.py setup --config config/config.yaml --encrypted
+    sf-rotation setup --config config/config.yaml        # New destination
+    sf-rotation update-keys --config config/config.yaml  # Existing destination
+    sf-rotation rotate --config config/config.yaml       # Key rotation
+    sf-rotation setup --config config/config.yaml --encrypted  # With encryption
 """
 
 import argparse
@@ -36,7 +37,7 @@ from .utils import (
 )
 
 
-def run_setup(config: dict, encrypted: bool = False) -> bool:
+def run_setup(config: dict, config_path: str, encrypted: bool = False) -> bool:
     """
     Run the initial key pair setup process.
     
@@ -45,10 +46,11 @@ def run_setup(config: dict, encrypted: bool = False) -> bool:
     2. Connect to Snowflake
     3. Set RSA_PUBLIC_KEY for user
     4. Create Hevo destination with private key
-    5. Save destination_id to config
+    5. Save destination_id to config file
     
     Args:
         config: Configuration dictionary
+        config_path: Path to the configuration file (for auto-saving destination_id)
         encrypted: Whether to use encrypted private key
         
     Returns:
@@ -168,10 +170,11 @@ def run_setup(config: dict, encrypted: bool = False) -> bool:
         if destination_id:
             print_info(f"Destination ID: {destination_id}")
             
-            # Step 5: Save destination_id to config
-            print_step(5, "Saving destination ID to configuration")
+            # Step 5: Save destination_id to config file
+            print_step(5, "Saving destination ID to configuration file")
             config['hevo']['destination_id'] = str(destination_id)
-            print_info("Remember to save this destination_id in your config file for future rotations")
+            save_config(config, config_path)
+            print_success(f"Destination ID saved to {config_path}")
         
         print_success("Hevo destination created successfully")
         
@@ -183,7 +186,7 @@ def run_setup(config: dict, encrypted: bool = False) -> bool:
         print(f"  - Public key: rsa_key.pub")
         if destination_id:
             print(f"\nHevo Destination ID: {destination_id}")
-            print("(Save this ID in your config.yaml for future key rotations)")
+            print(f"(Automatically saved to {config_path})")
         
         return True
         
@@ -201,7 +204,7 @@ def run_setup(config: dict, encrypted: bool = False) -> bool:
         return False
 
 
-def run_rotate(config: dict, encrypted: bool = False) -> bool:
+def run_rotate(config: dict, config_path: str, encrypted: bool = False) -> bool:
     """
     Run the key rotation process.
     
@@ -215,6 +218,7 @@ def run_rotate(config: dict, encrypted: bool = False) -> bool:
     
     Args:
         config: Configuration dictionary
+        config_path: Path to the configuration file
         encrypted: Whether to use encrypted private key
         
     Returns:
@@ -392,6 +396,170 @@ def run_rotate(config: dict, encrypted: bool = False) -> bool:
         return False
 
 
+def run_update_keys(config: dict, config_path: str, encrypted: bool = False) -> bool:
+    """
+    Update keys for an existing Hevo destination.
+    
+    Use this when you already have a Hevo destination (created via UI or API)
+    and want to set up or update key-pair authentication.
+    
+    Steps:
+    1. Verify destination_id exists in config
+    2. Generate new key pair
+    3. Connect to Snowflake and set public key
+    4. Update Hevo destination with new private key
+    
+    Args:
+        config: Configuration dictionary
+        config_path: Path to the configuration file
+        encrypted: Whether to use encrypted private key
+        
+    Returns:
+        True if update successful, False otherwise
+    """
+    print_banner()
+    print_info("Starting UPDATE-KEYS process for existing destination")
+    
+    # Get configuration values
+    sf_config = config['snowflake']
+    hevo_config = config['hevo']
+    keys_config = config['keys']
+    
+    keys_dir = keys_config.get('output_directory', './keys')
+    passphrase = None
+    
+    # Step 1: Verify destination_id exists
+    destination_id = hevo_config.get('destination_id')
+    if not destination_id:
+        print_error("destination_id is not set in config.")
+        print_info("For existing destinations, add 'destination_id' to your config file:")
+        print_info("  hevo:")
+        print_info("    destination_id: 'your_destination_id'")
+        print_info("\nYou can find your destination ID in the Hevo dashboard.")
+        return False
+    
+    print_info(f"Using existing destination ID: {destination_id}")
+    
+    # Handle encryption/passphrase
+    if encrypted or keys_config.get('encrypted'):
+        encrypted = True
+        passphrase = keys_config.get('passphrase')
+        if not passphrase:
+            passphrase = get_passphrase("Enter passphrase for private key encryption: ")
+            confirm_passphrase = get_passphrase("Confirm passphrase: ")
+            if passphrase != confirm_passphrase:
+                print_error("Passphrases do not match!")
+                return False
+    
+    try:
+        # Step 2: Generate key pair (with automatic backup of existing keys)
+        print_step(1, "Generating RSA key pair")
+        
+        key_generator = KeyGenerator(output_directory=keys_dir)
+        private_key_path, public_key_path, backup_path = key_generator.generate_key_pair(
+            key_name="rsa_key",
+            encrypted=encrypted,
+            passphrase=passphrase,
+            backup_existing=True
+        )
+        
+        if backup_path:
+            print_warning(f"Existing keys backed up to: {backup_path}")
+        
+        print_info(f"Private key saved to: {private_key_path}")
+        print_info(f"Public key saved to: {public_key_path}")
+        
+        # Read and format keys
+        private_key_content = key_generator.read_private_key(private_key_path)
+        public_key_content = key_generator.read_public_key(public_key_path)
+        formatted_public_key = key_generator.format_public_key_for_snowflake(public_key_content)
+        
+        print_success("Key pair generated successfully")
+        
+        # Step 3: Connect to Snowflake
+        print_step(2, "Connecting to Snowflake")
+        
+        sf_client = SnowflakeClient(
+            account_url=sf_config['account_url'],
+            username=sf_config['username'],
+            password=sf_config['password'],
+            warehouse=sf_config.get('warehouse'),
+            database=sf_config.get('database')
+        )
+        
+        sf_client.test_connection()
+        print_success("Connected to Snowflake successfully")
+        
+        # Step 4: Check available key slot and set public key
+        print_step(3, f"Setting RSA public key for user: {sf_config['user_to_modify']}")
+        
+        # Check which key slot is available
+        key_slot = sf_client.get_available_key_slot(sf_config['user_to_modify'])
+        
+        if key_slot == 0:
+            print_error("Both RSA_PUBLIC_KEY and RSA_PUBLIC_KEY_2 are already set for this user")
+            print_info("Run 'rotate' mode to rotate keys, or manually UNSET one of the keys:")
+            print_info("  ALTER USER <user> UNSET RSA_PUBLIC_KEY;")
+            print_info("  ALTER USER <user> UNSET RSA_PUBLIC_KEY_2;")
+            return False
+        elif key_slot == 2:
+            print_warning("RSA_PUBLIC_KEY already set, using RSA_PUBLIC_KEY_2 instead")
+            sf_client.set_rsa_public_key_2(
+                user=sf_config['user_to_modify'],
+                public_key=formatted_public_key
+            )
+        else:
+            sf_client.set_rsa_public_key(
+                user=sf_config['user_to_modify'],
+                public_key=formatted_public_key
+            )
+        
+        # Verify key was set
+        sf_client.verify_key_setup(sf_config['user_to_modify'])
+        print_success("RSA public key set successfully in Snowflake")
+        
+        # Step 5: Update Hevo destination with private key
+        print_step(4, f"Updating Hevo destination (ID: {destination_id}) with private key")
+        
+        hevo_client = HevoClient(
+            base_url=hevo_config['base_url'],
+            username=hevo_config['username'],
+            password=hevo_config['password']
+        )
+        
+        hevo_client.update_destination(
+            destination_id=destination_id,
+            private_key=private_key_content,
+            private_key_passphrase=passphrase
+        )
+        
+        print_success("Hevo destination updated with private key")
+        
+        print("\n" + "="*60)
+        print("UPDATE-KEYS COMPLETE!")
+        print("="*60)
+        print(f"\nKey files location: {keys_dir}/")
+        print(f"  - Private key: rsa_key.p8")
+        print(f"  - Public key: rsa_key.pub")
+        print(f"\nHevo Destination ID: {destination_id}")
+        print("\nYour existing Hevo destination is now configured with key-pair authentication.")
+        
+        return True
+        
+    except KeyGenerationError as e:
+        print_error(f"Key generation failed: {e}")
+        return False
+    except SnowflakeClientError as e:
+        print_error(f"Snowflake operation failed: {e}")
+        return False
+    except HevoClientError as e:
+        print_error(f"Hevo API operation failed: {e}")
+        return False
+    except Exception as e:
+        print_error(f"Unexpected error: {e}")
+        return False
+
+
 def main():
     """Main entry point."""
     parser = argparse.ArgumentParser(
@@ -399,22 +567,24 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  Initial setup:
-    python main.py setup --config config/config.yaml
+  Initial setup (creates new Hevo destination):
+    sf-rotation setup --config config/config.yaml
+
+  Update keys for existing destination:
+    sf-rotation update-keys --config config/config.yaml
 
   Key rotation:
-    python main.py rotate --config config/config.yaml
+    sf-rotation rotate --config config/config.yaml
 
   With encrypted keys:
-    python main.py setup --config config/config.yaml --encrypted
-    python main.py rotate --config config/config.yaml --encrypted
+    sf-rotation setup --config config/config.yaml --encrypted
         """
     )
     
     parser.add_argument(
         'command',
-        choices=['setup', 'rotate'],
-        help="Command to execute: 'setup' for initial configuration, 'rotate' for key rotation"
+        choices=['setup', 'rotate', 'update-keys'],
+        help="Command: 'setup' (new destination), 'update-keys' (existing destination), 'rotate' (rotate keys)"
     )
     
     parser.add_argument(
@@ -464,9 +634,11 @@ Examples:
     success = False
     
     if args.command == 'setup':
-        success = run_setup(config, encrypted=args.encrypted)
+        success = run_setup(config, config_path=args.config, encrypted=args.encrypted)
     elif args.command == 'rotate':
-        success = run_rotate(config, encrypted=args.encrypted)
+        success = run_rotate(config, config_path=args.config, encrypted=args.encrypted)
+    elif args.command == 'update-keys':
+        success = run_update_keys(config, config_path=args.config, encrypted=args.encrypted)
     
     sys.exit(0 if success else 1)
 
