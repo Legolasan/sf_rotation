@@ -8,7 +8,84 @@ The tool has two modes: **Setup** (initial configuration) and **Rotate** (key ro
 
 ---
 
-## Setup Mode (`python main.py setup`)
+## Installation
+
+### Option 1: Install from PyPI (Recommended)
+
+```bash
+pip install sf-rotation
+```
+
+### Option 2: Install from GitHub
+
+```bash
+pip install git+https://github.com/Legolasan/sf_rotation.git
+```
+
+### Option 3: Install from Source
+
+```bash
+git clone https://github.com/Legolasan/sf_rotation.git
+cd sf_rotation
+pip install .
+```
+
+---
+
+## Quick Start
+
+### Step 1: Install the Package
+
+```bash
+pip install sf-rotation
+```
+
+### Step 2: Create Configuration File
+
+```bash
+mkdir -p config
+curl -o config/config.yaml https://raw.githubusercontent.com/Legolasan/sf_rotation/main/config/config.yaml.example
+```
+
+Or manually create `config/config.yaml`:
+
+```yaml
+snowflake:
+  account_url: "your_account.snowflakecomputing.com"
+  username: "admin_username"
+  password: "admin_password"
+  warehouse: "your_warehouse"
+  database: "your_database"
+  user_to_modify: "hevo_service_user"
+
+hevo:
+  base_url: "https://us.hevodata.com"
+  username: "your_hevo_username"
+  password: "your_hevo_password"
+  destination_id: ""
+  destination_name: "snowflake_destination"
+
+keys:
+  encrypted: false
+  passphrase: ""
+  output_directory: "./keys"
+```
+
+### Step 3: Run Initial Setup
+
+```bash
+sf-rotation setup --config config/config.yaml
+```
+
+### Step 4: Run Key Rotation (when needed)
+
+```bash
+sf-rotation rotate --config config/config.yaml
+```
+
+---
+
+## Setup Mode (`sf-rotation setup`)
 
 This is for first-time key pair configuration:
 
@@ -38,7 +115,7 @@ This is for first-time key pair configuration:
 
 ---
 
-## Rotate Mode (`python main.py rotate`)
+## Rotate Mode (`sf-rotation rotate`)
 
 This is for rotating existing keys:
 
@@ -68,6 +145,48 @@ This is for rotating existing keys:
 ### Step 7: Finalize
 - Renames `new_rsa_key.p8` to `rsa_key.p8`
 - Renames `new_rsa_key.pub` to `rsa_key.pub`
+
+---
+
+## CLI Reference
+
+### Available Commands
+
+| Command | Description |
+|---------|-------------|
+| `sf-rotation setup --config <path>` | Initial key pair setup |
+| `sf-rotation rotate --config <path>` | Rotate existing keys |
+
+### Options
+
+| Option | Description |
+|--------|-------------|
+| `--config`, `-c` | Path to YAML configuration file (required) |
+| `--encrypted`, `-e` | Use encrypted private key (passphrase prompted) |
+| `--log-level` | Logging level: DEBUG, INFO, WARNING, ERROR |
+
+### Examples
+
+```bash
+# Initial setup with non-encrypted key
+sf-rotation setup --config config/config.yaml
+
+# Initial setup with encrypted key
+sf-rotation setup --config config/config.yaml --encrypted
+
+# Key rotation
+sf-rotation rotate --config config/config.yaml
+
+# With debug logging
+sf-rotation setup --config config/config.yaml --log-level DEBUG
+```
+
+### Alternative: Run as Python Module
+
+```bash
+python -m sf_rotation setup --config config/config.yaml
+python -m sf_rotation rotate --config config/config.yaml
+```
 
 ---
 
@@ -116,8 +235,53 @@ During rotation, **both keys are temporarily valid** (RSA_PUBLIC_KEY and RSA_PUB
 
 | Module | Purpose |
 |--------|---------|
-| `src/key_generator.py` | OpenSSL key generation |
-| `src/snowflake_client.py` | Snowflake connection & ALTER USER commands |
-| `src/hevo_client.py` | Hevo REST API client |
-| `src/utils.py` | Logging, config, helpers |
-| `main.py` | Orchestrator (setup/rotate commands) |
+| `sf_rotation.key_generator` | OpenSSL key generation |
+| `sf_rotation.snowflake_client` | Snowflake connection & ALTER USER commands |
+| `sf_rotation.hevo_client` | Hevo REST API client |
+| `sf_rotation.utils` | Logging, config, helpers |
+| `sf_rotation.main` | CLI orchestrator (setup/rotate commands) |
+
+---
+
+## Programmatic Usage
+
+You can also use the package programmatically in your Python code:
+
+```python
+from sf_rotation import KeyGenerator, SnowflakeClient, HevoClient
+
+# Generate keys
+generator = KeyGenerator(output_directory="./keys")
+private_key_path, public_key_path = generator.generate_key_pair(
+    key_name="rsa_key",
+    encrypted=False
+)
+
+# Read keys
+private_key = generator.read_private_key(private_key_path)
+public_key = generator.read_public_key(public_key_path)
+formatted_public_key = generator.format_public_key_for_snowflake(public_key)
+
+# Configure Snowflake user
+sf_client = SnowflakeClient(
+    account_url="account.snowflakecomputing.com",
+    username="admin",
+    password="password"
+)
+sf_client.set_rsa_public_key("target_user", formatted_public_key)
+
+# Create Hevo destination
+hevo = HevoClient(
+    base_url="https://us.hevodata.com",
+    username="hevo_user",
+    password="hevo_pass"
+)
+hevo.create_destination(
+    name="my_snowflake_dest",
+    account_url="account.snowflakecomputing.com",
+    warehouse="WAREHOUSE",
+    database_name="DATABASE",
+    database_user="target_user",
+    private_key=private_key
+)
+```
