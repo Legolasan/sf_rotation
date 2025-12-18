@@ -1,5 +1,6 @@
 # Snowflake Key Pair Rotation Tool
 
+[![PyPI version](https://badge.fury.io/py/sf-rotation.svg)](https://badge.fury.io/py/sf-rotation)
 [![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
@@ -7,7 +8,13 @@ Automates Snowflake key-pair authentication setup and rotation with Hevo Data de
 
 ## Installation
 
-### From GitHub (Recommended)
+### From PyPI (Recommended)
+
+```bash
+pip install sf-rotation
+```
+
+### From GitHub
 
 ```bash
 pip install git+https://github.com/Legolasan/sf_rotation.git
