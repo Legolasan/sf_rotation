@@ -15,3 +15,9 @@ venv/
 .DS_Store
 *.log
 backups/
+
+# Build artifacts
+build/
+dist/
+*.egg-info/
+src/*.egg-info/

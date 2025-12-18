@@ -15,13 +15,10 @@ import argparse
 import sys
 from pathlib import Path
 
-# Add src directory to path
-sys.path.insert(0, str(Path(__file__).parent))
-
-from src.key_generator import KeyGenerator, KeyGenerationError
-from src.snowflake_client import SnowflakeClient, SnowflakeClientError
-from src.hevo_client import HevoClient, HevoClientError
-from src.utils import (
+from .key_generator import KeyGenerator, KeyGenerationError
+from .snowflake_client import SnowflakeClient, SnowflakeClientError
+from .hevo_client import HevoClient, HevoClientError
+from .utils import (
     load_config,
     save_config,
     validate_config,
