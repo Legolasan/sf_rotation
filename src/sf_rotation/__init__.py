@@ -5,7 +5,7 @@ A Python package for automating Snowflake key-pair authentication
 setup and rotation with Hevo Data destinations.
 """
 
-__version__ = "1.2.4"
+__version__ = "1.2.5"
 
 from .key_generator import KeyGenerator, KeyGenerationError
 from .snowflake_client import SnowflakeClient, SnowflakeClientError

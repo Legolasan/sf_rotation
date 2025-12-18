@@ -114,13 +114,17 @@ class HevoClient:
         Raises:
             HevoClientError: If destination creation fails
         """
+        # Strip leading/trailing whitespace from private key
+        # Hevo API rejects keys with extra whitespace
+        clean_private_key = private_key.strip() if private_key else private_key
+        
         config = {
             "authentication_type": "PRIVATE_KEY",
             "account_url": account_url,
             "warehouse": warehouse,
             "database_name": database_name,
             "database_user": database_user,
-            "private_key": private_key
+            "private_key": clean_private_key
         }
         
         if private_key_passphrase:
@@ -172,9 +176,13 @@ class HevoClient:
         Raises:
             HevoClientError: If destination update fails
         """
+        # Strip leading/trailing whitespace from private key
+        # Hevo API rejects keys with extra whitespace
+        clean_private_key = private_key.strip() if private_key else private_key
+        
         config = {
             "authentication_type": "PRIVATE_KEY",
-            "private_key": private_key
+            "private_key": clean_private_key
         }
         
         if private_key_passphrase:
