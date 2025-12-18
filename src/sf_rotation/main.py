@@ -77,15 +77,19 @@ def run_setup(config: dict, encrypted: bool = False) -> bool:
                 return False
     
     try:
-        # Step 1: Generate key pair
+        # Step 1: Generate key pair (with automatic backup of existing keys)
         print_step(1, "Generating RSA key pair")
         
         key_generator = KeyGenerator(output_directory=keys_dir)
-        private_key_path, public_key_path = key_generator.generate_key_pair(
+        private_key_path, public_key_path, backup_path = key_generator.generate_key_pair(
             key_name="rsa_key",
             encrypted=encrypted,
-            passphrase=passphrase
+            passphrase=passphrase,
+            backup_existing=True
         )
+        
+        if backup_path:
+            print_warning(f"Existing keys backed up to: {backup_path}")
         
         print_info(f"Private key saved to: {private_key_path}")
         print_info(f"Public key saved to: {public_key_path}")
@@ -111,17 +115,33 @@ def run_setup(config: dict, encrypted: bool = False) -> bool:
         sf_client.test_connection()
         print_success("Connected to Snowflake successfully")
         
-        # Step 3: Set RSA_PUBLIC_KEY for user
-        print_step(3, f"Setting RSA_PUBLIC_KEY for user: {sf_config['user_to_modify']}")
+        # Step 3: Check available key slot and set public key
+        print_step(3, f"Setting RSA public key for user: {sf_config['user_to_modify']}")
         
-        sf_client.set_rsa_public_key(
-            user=sf_config['user_to_modify'],
-            public_key=formatted_public_key
-        )
+        # Check which key slot is available
+        key_slot = sf_client.get_available_key_slot(sf_config['user_to_modify'])
+        
+        if key_slot == 0:
+            print_error("Both RSA_PUBLIC_KEY and RSA_PUBLIC_KEY_2 are already set for this user")
+            print_info("Run 'rotate' mode to rotate keys, or manually UNSET one of the keys:")
+            print_info("  ALTER USER <user> UNSET RSA_PUBLIC_KEY;")
+            print_info("  ALTER USER <user> UNSET RSA_PUBLIC_KEY_2;")
+            return False
+        elif key_slot == 2:
+            print_warning("RSA_PUBLIC_KEY already set, using RSA_PUBLIC_KEY_2 instead")
+            sf_client.set_rsa_public_key_2(
+                user=sf_config['user_to_modify'],
+                public_key=formatted_public_key
+            )
+        else:
+            sf_client.set_rsa_public_key(
+                user=sf_config['user_to_modify'],
+                public_key=formatted_public_key
+            )
         
         # Verify key was set
         sf_client.verify_key_setup(sf_config['user_to_modify'])
-        print_success("RSA_PUBLIC_KEY set successfully in Snowflake")
+        print_success("RSA public key set successfully in Snowflake")
         
         # Step 4: Create Hevo destination
         print_step(4, "Creating Hevo destination with key-pair authentication")
@@ -244,10 +264,12 @@ def run_rotate(config: dict, encrypted: bool = False) -> bool:
         key_generator = KeyGenerator(output_directory=keys_dir)
         
         # Use new_rsa_key as name to differentiate during rotation
-        private_key_path, public_key_path = key_generator.generate_key_pair(
+        # Don't backup since we're using a different key name
+        private_key_path, public_key_path, _ = key_generator.generate_key_pair(
             key_name="new_rsa_key",
             encrypted=encrypted,
-            passphrase=passphrase
+            passphrase=passphrase,
+            backup_existing=False
         )
         
         print_info(f"New private key saved to: {private_key_path}")

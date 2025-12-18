@@ -8,7 +8,9 @@ Supports both encrypted (DES3) and non-encrypted private keys.
 import subprocess
 import os
 import re
+import shutil
 from pathlib import Path
+from datetime import datetime
 from typing import Tuple, Optional
 
 
@@ -39,6 +41,34 @@ class KeyGenerator:
     def _ensure_output_directory(self) -> None:
         """Create the output directory if it doesn't exist."""
         self.output_directory.mkdir(parents=True, exist_ok=True)
+    
+    def _backup_existing_keys(self, key_name: str) -> Optional[str]:
+        """
+        Backup existing keys if they exist before generating new ones.
+        
+        Args:
+            key_name: Base name of the key files to backup
+            
+        Returns:
+            Path to backup directory if keys were backed up, None otherwise
+        """
+        private_key = self.output_directory / f"{key_name}.p8"
+        public_key = self.output_directory / f"{key_name}.pub"
+        
+        if private_key.exists() or public_key.exists():
+            # Create backup directory with timestamp
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            backup_dir = self.output_directory / "backups" / timestamp
+            backup_dir.mkdir(parents=True, exist_ok=True)
+            
+            # Move existing keys to backup
+            if private_key.exists():
+                shutil.move(str(private_key), str(backup_dir / private_key.name))
+            if public_key.exists():
+                shutil.move(str(public_key), str(backup_dir / public_key.name))
+            
+            return str(backup_dir)
+        return None
     
     def _run_command(self, command: str, input_data: Optional[bytes] = None) -> bytes:
         """
@@ -162,8 +192,9 @@ class KeyGenerator:
         self,
         key_name: str = "rsa_key",
         encrypted: bool = False,
-        passphrase: Optional[str] = None
-    ) -> Tuple[Path, Path]:
+        passphrase: Optional[str] = None,
+        backup_existing: bool = True
+    ) -> Tuple[Path, Path, Optional[str]]:
         """
         Generate a complete RSA key pair (private and public keys).
         
@@ -171,10 +202,16 @@ class KeyGenerator:
             key_name: Base name for the key files
             encrypted: Whether to encrypt the private key
             passphrase: Passphrase for encrypted key
+            backup_existing: Whether to backup existing keys before generating
             
         Returns:
-            Tuple of (private_key_path, public_key_path)
+            Tuple of (private_key_path, public_key_path, backup_path or None)
         """
+        # Backup existing keys if requested
+        backup_path = None
+        if backup_existing:
+            backup_path = self._backup_existing_keys(key_name)
+        
         private_key_path = self.generate_private_key(
             key_name=key_name,
             encrypted=encrypted,
@@ -186,7 +223,7 @@ class KeyGenerator:
             passphrase=passphrase
         )
         
-        return private_key_path, public_key_path
+        return private_key_path, public_key_path, backup_path
     
     @staticmethod
     def read_private_key(private_key_path: Path) -> str:

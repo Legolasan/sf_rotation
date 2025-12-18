@@ -272,6 +272,33 @@ class SnowflakeClient:
             print(f"User {user} has RSA_PUBLIC_KEY_2 set (fingerprint: {key_info['RSA_PUBLIC_KEY_2_FP']})")
         
         return has_key_1 or has_key_2
+    
+    def get_available_key_slot(self, user: str) -> int:
+        """
+        Check which RSA key slot is available for a user.
+        
+        Used during setup to determine which key slot to use:
+        - Returns 1 if RSA_PUBLIC_KEY is free (preferred)
+        - Returns 2 if RSA_PUBLIC_KEY is set but RSA_PUBLIC_KEY_2 is free
+        - Returns 0 if both slots are occupied
+        
+        Args:
+            user: Username to check
+            
+        Returns:
+            1 for RSA_PUBLIC_KEY, 2 for RSA_PUBLIC_KEY_2, 0 if both occupied
+        """
+        key_info = self.get_user_public_keys(user)
+        
+        key1_set = key_info.get('RSA_PUBLIC_KEY_FP') is not None
+        key2_set = key_info.get('RSA_PUBLIC_KEY_2_FP') is not None
+        
+        if not key1_set:
+            return 1  # Use RSA_PUBLIC_KEY
+        elif not key2_set:
+            return 2  # Use RSA_PUBLIC_KEY_2
+        else:
+            return 0  # Both slots occupied
 
 
 if __name__ == "__main__":
