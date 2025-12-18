@@ -273,6 +273,29 @@ class SnowflakeClient:
         
         return has_key_1 or has_key_2
     
+    @staticmethod
+    def _is_key_set(fingerprint) -> bool:
+        """
+        Check if a key fingerprint indicates the key is actually set.
+        
+        Snowflake can return various values when a key is not set:
+        - None (Python null)
+        - '' (empty string)
+        - 'null' (literal string)
+        
+        Args:
+            fingerprint: The fingerprint value from DESCRIBE USER
+            
+        Returns:
+            True if the key is actually set, False otherwise
+        """
+        if fingerprint is None:
+            return False
+        if isinstance(fingerprint, str):
+            if fingerprint == '' or fingerprint.lower() == 'null':
+                return False
+        return True
+    
     def get_available_key_slot(self, user: str) -> int:
         """
         Check which RSA key slot is available for a user.
@@ -291,12 +314,12 @@ class SnowflakeClient:
         key_info = self.get_user_public_keys(user)
         
         # Check if key fingerprint exists and is not empty
-        # Snowflake returns empty string '' when key is not set, not None
+        # Snowflake can return: None, empty string '', or literal string 'null'
         key1_fp = key_info.get('RSA_PUBLIC_KEY_FP')
         key2_fp = key_info.get('RSA_PUBLIC_KEY_2_FP')
         
-        key1_set = key1_fp is not None and key1_fp != ''
-        key2_set = key2_fp is not None and key2_fp != ''
+        key1_set = self._is_key_set(key1_fp)
+        key2_set = self._is_key_set(key2_fp)
         
         if not key1_set:
             return 1  # Use RSA_PUBLIC_KEY
