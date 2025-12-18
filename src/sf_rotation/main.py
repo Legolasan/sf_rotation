@@ -306,8 +306,13 @@ def run_rotate(config: dict, config_path: str, encrypted: bool = False) -> bool:
         print_step(4, f"Detecting current key slot for user: {sf_config['user_to_modify']}")
         
         key_info = sf_client.get_user_public_keys(sf_config['user_to_modify'])
-        key1_set = key_info.get('RSA_PUBLIC_KEY_FP') is not None
-        key2_set = key_info.get('RSA_PUBLIC_KEY_2_FP') is not None
+        
+        # Check if key fingerprint exists and is not empty
+        # Snowflake returns empty string '' when key is not set, not None
+        key1_fp = key_info.get('RSA_PUBLIC_KEY_FP')
+        key2_fp = key_info.get('RSA_PUBLIC_KEY_2_FP')
+        key1_set = key1_fp is not None and key1_fp != ''
+        key2_set = key2_fp is not None and key2_fp != ''
         
         # Determine which slot has the OLD key and which slot to use for NEW key
         if key1_set and not key2_set:

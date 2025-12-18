@@ -290,8 +290,13 @@ class SnowflakeClient:
         """
         key_info = self.get_user_public_keys(user)
         
-        key1_set = key_info.get('RSA_PUBLIC_KEY_FP') is not None
-        key2_set = key_info.get('RSA_PUBLIC_KEY_2_FP') is not None
+        # Check if key fingerprint exists and is not empty
+        # Snowflake returns empty string '' when key is not set, not None
+        key1_fp = key_info.get('RSA_PUBLIC_KEY_FP')
+        key2_fp = key_info.get('RSA_PUBLIC_KEY_2_FP')
+        
+        key1_set = key1_fp is not None and key1_fp != ''
+        key2_set = key2_fp is not None and key2_fp != ''
         
         if not key1_set:
             return 1  # Use RSA_PUBLIC_KEY
