@@ -65,17 +65,21 @@ sf-rotation update-keys --config config/config.yaml
 # Key rotation (for ongoing key rotations)
 sf-rotation rotate --config config/config.yaml
 
+# Snowflake-only setup (no Hevo integration)
+sf-rotation snowflake-only --config config/config.yaml
+
 # With encrypted private key
 sf-rotation setup --config config/config.yaml --encrypted
 ```
 
 ### Commands Overview
 
-| Command | Description | Creates Hevo Destination? |
-|---------|-------------|---------------------------|
-| `setup` | Initial setup - creates new Hevo destination | Yes |
-| `update-keys` | Update keys for existing Hevo destination | No (requires `destination_id`) |
-| `rotate` | Rotate keys with zero-downtime (repeatable) | No (requires `destination_id`) |
+| Command | Description | Hevo Integration |
+|---------|-------------|------------------|
+| `setup` | Initial setup - creates new Hevo destination | Creates new |
+| `update-keys` | Update keys for existing Hevo destination | Updates existing |
+| `rotate` | Rotate keys with zero-downtime (repeatable) | Updates existing |
+| `snowflake-only` | Set up Snowflake keys only (no Hevo) | **None** |
 
 > **Tip**: Run `rotate` as many times as needed - it automatically alternates between Snowflake key slots.
 
@@ -84,6 +88,7 @@ sf-rotation setup --config config/config.yaml --encrypted
 ```bash
 python -m sf_rotation setup --config config/config.yaml
 python -m sf_rotation rotate --config config/config.yaml
+python -m sf_rotation snowflake-only --config config/config.yaml
 ```
 
 ### Programmatic Usage
@@ -159,6 +164,14 @@ hevo.create_destination(
 6. Unset the **old key slot**
 
 > **Note**: Rotation alternates between slots, allowing unlimited rotations without conflicts.
+
+### Snowflake-Only Mode (No Hevo)
+1. Generate RSA key pair
+2. Connect to Snowflake (username/password)
+3. Set `RSA_PUBLIC_KEY` for target user
+4. **Does NOT interact with Hevo APIs**
+
+> **Use Case**: Configure Snowflake key-pair auth when you manage Hevo separately or don't use Hevo at all.
 
 ## Project Structure
 
