@@ -11,6 +11,7 @@ Usage:
     sf-rotation setup --config config/config.yaml        # New destination
     sf-rotation update-keys --config config/config.yaml  # Existing destination
     sf-rotation rotate --config config/config.yaml       # Key rotation
+    sf-rotation snowflake-only --config config/config.yaml  # Snowflake only (no Hevo)
     sf-rotation setup --config config/config.yaml --encrypted  # With encryption
 """
 
@@ -627,6 +628,139 @@ def run_update_keys(config: dict, config_path: str, encrypted: bool = False) -> 
         return False
 
 
+def run_snowflake_only(config: dict, config_path: str, encrypted: bool = False) -> bool:
+    """
+    Set up Snowflake key-pair authentication only (no Hevo).
+    
+    Use this when you want to configure Snowflake key-pair authentication
+    but manage Hevo separately or don't use Hevo at all.
+    
+    Steps:
+    1. Generate key pair
+    2. Connect to Snowflake
+    3. Set RSA_PUBLIC_KEY for user
+    
+    Does NOT interact with Hevo APIs.
+    
+    Args:
+        config: Configuration dictionary
+        config_path: Path to the configuration file
+        encrypted: Whether to use encrypted private key
+        
+    Returns:
+        True if setup successful, False otherwise
+    """
+    print_banner()
+    print_info("Starting SNOWFLAKE-ONLY setup (no Hevo integration)")
+    
+    # Get configuration values
+    sf_config = config['snowflake']
+    keys_config = config['keys']
+    
+    keys_dir = keys_config.get('output_directory', './keys')
+    passphrase = None
+    
+    # Handle encryption/passphrase
+    if encrypted or keys_config.get('encrypted'):
+        encrypted = True
+        passphrase = keys_config.get('passphrase')
+        if not passphrase:
+            passphrase = get_passphrase("Enter passphrase for private key encryption: ")
+            confirm_passphrase = get_passphrase("Confirm passphrase: ")
+            if passphrase != confirm_passphrase:
+                print_error("Passphrases do not match!")
+                return False
+    
+    try:
+        # Step 1: Generate key pair (with automatic backup of existing keys)
+        print_step(1, "Generating RSA key pair")
+        
+        key_generator = KeyGenerator(output_directory=keys_dir)
+        private_key_path, public_key_path, backup_path = key_generator.generate_key_pair(
+            key_name="rsa_key",
+            encrypted=encrypted,
+            passphrase=passphrase,
+            backup_existing=True
+        )
+        
+        if backup_path:
+            print_warning(f"Existing keys backed up to: {backup_path}")
+        
+        print_info(f"Private key saved to: {private_key_path}")
+        print_info(f"Public key saved to: {public_key_path}")
+        
+        # Read and format keys
+        public_key_content = key_generator.read_public_key(public_key_path)
+        formatted_public_key = key_generator.format_public_key_for_snowflake(public_key_content)
+        
+        print_success("Key pair generated successfully")
+        
+        # Step 2: Connect to Snowflake
+        print_step(2, "Connecting to Snowflake")
+        
+        sf_client = SnowflakeClient(
+            account_url=sf_config['account_url'],
+            username=sf_config['username'],
+            password=sf_config['password'],
+            warehouse=sf_config.get('warehouse'),
+            database=sf_config.get('database')
+        )
+        
+        sf_client.test_connection()
+        print_success("Connected to Snowflake successfully")
+        
+        # Step 3: Check available key slot and set public key
+        print_step(3, f"Setting RSA public key for user: {sf_config['user_to_modify']}")
+        
+        # Check which key slot is available
+        key_slot = sf_client.get_available_key_slot(sf_config['user_to_modify'])
+        
+        if key_slot == 0:
+            print_error("Both RSA_PUBLIC_KEY and RSA_PUBLIC_KEY_2 are already set for this user")
+            print_info("Please manually UNSET one of the keys first:")
+            print_info("  ALTER USER <user> UNSET RSA_PUBLIC_KEY;")
+            print_info("  ALTER USER <user> UNSET RSA_PUBLIC_KEY_2;")
+            return False
+        elif key_slot == 2:
+            print_warning("RSA_PUBLIC_KEY already set, using RSA_PUBLIC_KEY_2 instead")
+            sf_client.set_rsa_public_key_2(
+                user=sf_config['user_to_modify'],
+                public_key=formatted_public_key
+            )
+        else:
+            sf_client.set_rsa_public_key(
+                user=sf_config['user_to_modify'],
+                public_key=formatted_public_key
+            )
+        
+        # Verify key was set
+        sf_client.verify_key_setup(sf_config['user_to_modify'])
+        print_success("RSA public key set successfully in Snowflake")
+        
+        print("\n" + "="*60)
+        print("SNOWFLAKE-ONLY SETUP COMPLETE!")
+        print("="*60)
+        print(f"\nKey files location: {keys_dir}/")
+        print(f"  - Private key: rsa_key.p8")
+        print(f"  - Public key: rsa_key.pub")
+        print(f"\nSnowflake user: {sf_config['user_to_modify']}")
+        print("\nNext steps:")
+        print("  - Configure Hevo manually with the private key, OR")
+        print("  - Run 'sf-rotation update-keys' to update an existing Hevo destination")
+        
+        return True
+        
+    except KeyGenerationError as e:
+        print_error(f"Key generation failed: {e}")
+        return False
+    except SnowflakeClientError as e:
+        print_error(f"Snowflake operation failed: {e}")
+        return False
+    except Exception as e:
+        print_error(f"Unexpected error: {e}")
+        return False
+
+
 def main():
     """Main entry point."""
     parser = argparse.ArgumentParser(
@@ -640,9 +774,10 @@ with Hevo Data destinations.
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog='''
 COMMANDS:
-  setup        Create new keys and NEW Hevo destination
-  update-keys  Create new keys for EXISTING Hevo destination  
-  rotate       Rotate keys (can run multiple times)
+  setup           Create new keys and NEW Hevo destination
+  update-keys     Create new keys for EXISTING Hevo destination  
+  rotate          Rotate keys (can run multiple times)
+  snowflake-only  Set up Snowflake keys only (no Hevo)
 
 QUICK START:
   1. Install:     pip install sf-rotation
@@ -653,6 +788,7 @@ For command-specific help:
   sf-rotation setup --help
   sf-rotation update-keys --help
   sf-rotation rotate --help
+  sf-rotation snowflake-only --help
 
 Documentation: https://github.com/Legolasan/sf_rotation
         '''
@@ -754,8 +890,40 @@ EXAMPLES:
         '''
     )
     
+    # Snowflake-only subcommand
+    snowflake_only_parser = subparsers.add_parser(
+        'snowflake-only',
+        help='Set up Snowflake key-pair auth only (no Hevo)',
+        description='''
+SNOWFLAKE-ONLY - Configure Snowflake Without Hevo
+
+Use this when you want to set up key-pair authentication in Snowflake
+but manage Hevo separately (or don't use Hevo at all).
+
+WHAT IT DOES:
+  1. Generates RSA key pair (saves to ./keys/)
+  2. Connects to Snowflake with admin credentials
+  3. Sets RSA_PUBLIC_KEY for target user
+
+WHAT IT DOES NOT DO:
+  - Does NOT create or update Hevo destinations
+  - Does NOT require Hevo credentials in config
+
+USE CASES:
+  - Testing Snowflake key-pair auth before Hevo integration
+  - Users who manage Hevo manually
+  - Users who don't use Hevo at all
+        ''',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog='''
+EXAMPLES:
+  sf-rotation snowflake-only --config config/config.yaml
+  sf-rotation snowflake-only --config config/config.yaml --encrypted
+        '''
+    )
+    
     # Add common arguments to each subparser
-    for subparser in [setup_parser, update_parser, rotate_parser]:
+    for subparser in [setup_parser, update_parser, rotate_parser, snowflake_only_parser]:
         subparser.add_argument(
             '--config', '-c',
             required=True,
@@ -807,6 +975,8 @@ EXAMPLES:
         success = run_rotate(config, config_path=args.config, encrypted=args.encrypted)
     elif args.command == 'update-keys':
         success = run_update_keys(config, config_path=args.config, encrypted=args.encrypted)
+    elif args.command == 'snowflake-only':
+        success = run_snowflake_only(config, config_path=args.config, encrypted=args.encrypted)
     
     sys.exit(0 if success else 1)
 
