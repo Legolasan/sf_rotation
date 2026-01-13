@@ -6,6 +6,10 @@ snowflake:
   # Snowflake account URL (e.g., 'your-account.snowflakecomputing.com')
   account_url: "your_account.snowflakecomputing.com"
   
+  # AWS region for Snowflake (required for v2.0 API)
+  # Common values: us-west-2, us-east-1, eu-west-1, ap-southeast-1
+  region: "us-west-2"
+  
   # Admin credentials for connecting to Snowflake
   # This user must have permission to ALTER USER for the target user
   username: "admin_username"

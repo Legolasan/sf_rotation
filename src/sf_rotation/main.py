@@ -183,7 +183,8 @@ def run_setup(config: dict, config_path: str, encrypted: bool = False, api_versi
             database_name=sf_config.get('database', ''),
             database_user=sf_config['user_to_modify'],
             private_key=private_key_content,
-            private_key_passphrase=passphrase
+            private_key_passphrase=passphrase,
+            region=sf_config.get('region')
         )
         
         # Extract destination_id from response

@@ -113,6 +113,27 @@ class HevoClient:
         account = account.replace('.snowflakecomputing.com', '')
         return account
     
+    def _extract_region(self, account_url: str) -> str:
+        """
+        Extract AWS region from Snowflake account URL.
+        
+        Args:
+            account_url: Full account URL (e.g., 'xxx.us-west-2.snowflakecomputing.com')
+            
+        Returns:
+            AWS region (e.g., 'us-west-2'). Defaults to 'us-west-2' if not found.
+        """
+        # Remove protocol if present
+        account = account_url.replace('https://', '').replace('http://', '')
+        # Remove .snowflakecomputing.com suffix if present
+        account = account.replace('.snowflakecomputing.com', '')
+        
+        # Split by '.' and find region (e.g., xxx.us-west-2 -> us-west-2)
+        parts = account.split('.')
+        if len(parts) >= 2:
+            return parts[1]
+        return 'us-west-2'
+    
     def _build_create_payload(
         self,
         name: str,
@@ -122,7 +143,8 @@ class HevoClient:
         database_user: str,
         private_key: str,
         private_key_passphrase: Optional[str] = None,
-        connector_id: str = "snowflake"
+        connector_id: str = "snowflake",
+        region: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Build the create destination payload based on API version.
@@ -131,16 +153,19 @@ class HevoClient:
             - destination_type, account_url, database_name, database_user, PRIVATE_KEY
             
         v2.0 (Testing) schema:
-            - type, account_name, db_name, db_user, KEY_PAIR
+            - type, account_name, db_name, db_user, KEY_PAIR, region_id
         """
         # Strip leading/trailing whitespace from private key
         clean_private_key = private_key.strip() if private_key else private_key
         
         if self.api_version == "v2.0":
             # v2.0 API schema (Testing)
+            # Use explicit region if provided, otherwise try to extract from URL
+            region_value = region if region else self._extract_region(account_url)
             config = {
                 "authentication_type": "KEY_PAIR",
                 "account_name": self._extract_account_name(account_url),
+                "region": region_value,
                 "warehouse": warehouse,
                 "db_name": database_name,
                 "db_user": database_user,
@@ -187,7 +212,8 @@ class HevoClient:
         database_user: str,
         private_key: str,
         private_key_passphrase: Optional[str] = None,
-        connector_id: str = "snowflake"
+        connector_id: str = "snowflake",
+        region: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Create a new Snowflake destination with key-pair authentication.
@@ -201,6 +227,7 @@ class HevoClient:
             private_key: Private key content (PEM format)
             private_key_passphrase: Passphrase if key is encrypted
             connector_id: Connector type (default: 'snowflake', used in v1 only)
+            region: AWS region for Snowflake (required for v2.0 API, e.g., 'us-west-2')
             
         Returns:
             API response containing destination details including ID
@@ -216,7 +243,8 @@ class HevoClient:
             database_user=database_user,
             private_key=private_key,
             private_key_passphrase=private_key_passphrase,
-            connector_id=connector_id
+            connector_id=connector_id,
+            region=region
         )
         
         url = self._get_url("destinations")
