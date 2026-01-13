@@ -32,8 +32,15 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+test = [
+    "pytest>=7.0.0",
+    "pytest-mock>=3.10.0",
+    "responses>=0.23.0",
+]
 dev = [
     "pytest>=7.0.0",
+    "pytest-mock>=3.10.0",
+    "responses>=0.23.0",
     "black>=23.0.0",
     "flake8>=6.0.0",
 ]
@@ -51,3 +58,13 @@ where = ["src"]
 
 [tool.setuptools.package-data]
 sf_rotation = ["*.yaml", "*.yml"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+markers = [
+    "integration: mark test as integration test (requires real credentials)",
+]
+addopts = "-v --tb=short"
