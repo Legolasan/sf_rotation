@@ -272,18 +272,32 @@ class HevoClient:
         self,
         private_key: str,
         private_key_passphrase: Optional[str] = None,
-        connector_id: str = "snowflake"
+        connector_id: str = "snowflake",
+        account_url: Optional[str] = None,
+        warehouse: Optional[str] = None,
+        database_name: Optional[str] = None,
+        database_user: Optional[str] = None,
+        region: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Build the update destination payload based on API version.
+        
+        v2.0 requires full config including account_name, region, etc.
+        v1 only needs the updated fields.
         """
         # Strip leading/trailing whitespace from private key
         clean_private_key = private_key.strip() if private_key else private_key
         
         if self.api_version == "v2.0":
-            # v2.0 API schema (Testing)
+            # v2.0 API requires full config for PUT updates
+            region_value = region if region else self._extract_region(account_url) if account_url else 'us-west-2'
             config = {
                 "authentication_type": "KEY_PAIR",
+                "account_name": self._extract_account_name(account_url) if account_url else "",
+                "region": region_value,
+                "warehouse": warehouse or "",
+                "db_name": database_name or "",
+                "db_user": database_user or "",
                 "private_key": clean_private_key
             }
             
@@ -294,7 +308,7 @@ class HevoClient:
                 "config": config
             }
         else:
-            # v1 API schema (Production)
+            # v1 API schema (Production) - only needs updated fields
             config = {
                 "authentication_type": "PRIVATE_KEY",
                 "private_key": clean_private_key
@@ -315,7 +329,12 @@ class HevoClient:
         destination_id: str,
         private_key: str,
         private_key_passphrase: Optional[str] = None,
-        connector_id: str = "snowflake"
+        connector_id: str = "snowflake",
+        account_url: Optional[str] = None,
+        warehouse: Optional[str] = None,
+        database_name: Optional[str] = None,
+        database_user: Optional[str] = None,
+        region: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Update an existing Snowflake destination with a new private key.
@@ -327,6 +346,11 @@ class HevoClient:
             private_key: New private key content (PEM format)
             private_key_passphrase: Passphrase if key is encrypted
             connector_id: Connector type (default: 'snowflake', used in v1 only)
+            account_url: Snowflake account URL (required for v2.0)
+            warehouse: Snowflake warehouse (required for v2.0)
+            database_name: Database name (required for v2.0)
+            database_user: Database user (required for v2.0)
+            region: AWS region (required for v2.0)
             
         Returns:
             API response with update confirmation
@@ -337,18 +361,32 @@ class HevoClient:
         payload = self._build_update_payload(
             private_key=private_key,
             private_key_passphrase=private_key_passphrase,
-            connector_id=connector_id
+            connector_id=connector_id,
+            account_url=account_url,
+            warehouse=warehouse,
+            database_name=database_name,
+            database_user=database_user,
+            region=region
         )
         
         url = self._get_url(f"destinations/{destination_id}")
         
         try:
-            response = requests.patch(
-                url,
-                json=payload,
-                headers=self.headers,
-                auth=self.auth
-            )
+            # v2.0 API uses PUT, v1 uses PATCH
+            if self.api_version == "v2.0":
+                response = requests.put(
+                    url,
+                    json=payload,
+                    headers=self.headers,
+                    auth=self.auth
+                )
+            else:
+                response = requests.patch(
+                    url,
+                    json=payload,
+                    headers=self.headers,
+                    auth=self.auth
+                )
             result = self._handle_response(response)
             print(f"Successfully updated destination: {destination_id} (API {self.api_version})")
             return result

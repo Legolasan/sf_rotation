@@ -391,7 +391,12 @@ def run_rotate(config: dict, config_path: str, encrypted: bool = False, api_vers
         hevo_client.update_destination(
             destination_id=destination_id,
             private_key=private_key_content,
-            private_key_passphrase=passphrase
+            private_key_passphrase=passphrase,
+            account_url=sf_config['account_url'],
+            warehouse=sf_config.get('warehouse', ''),
+            database_name=sf_config.get('database', ''),
+            database_user=sf_config['user_to_modify'],
+            region=sf_config.get('region')
         )
         
         print_success("Hevo destination updated with new private key")
@@ -605,7 +610,12 @@ def run_update_keys(config: dict, config_path: str, encrypted: bool = False, api
         hevo_client.update_destination(
             destination_id=destination_id,
             private_key=private_key_content,
-            private_key_passphrase=passphrase
+            private_key_passphrase=passphrase,
+            account_url=sf_config['account_url'],
+            warehouse=sf_config.get('warehouse', ''),
+            database_name=sf_config.get('database', ''),
+            database_user=sf_config['user_to_modify'],
+            region=sf_config.get('region')
         )
         
         print_success("Hevo destination updated with private key")
