@@ -101,17 +101,23 @@ class HevoClient:
         """
         Extract account name from Snowflake account URL.
         
+        Handles both formats:
+            - 'account.snowflakecomputing.com' -> 'account'
+            - 'account.region.snowflakecomputing.com' -> 'account'
+        
         Args:
-            account_url: Full account URL (e.g., 'account.snowflakecomputing.com')
+            account_url: Full account URL
             
         Returns:
-            Account name/identifier
+            Account name/identifier (without region)
         """
         # Remove protocol if present
         account = account_url.replace('https://', '').replace('http://', '')
         # Remove .snowflakecomputing.com suffix if present
         account = account.replace('.snowflakecomputing.com', '')
-        return account
+        # Return only the first part (account identifier, not region)
+        parts = account.split('.')
+        return parts[0]
     
     def _extract_region(self, account_url: str) -> str:
         """
