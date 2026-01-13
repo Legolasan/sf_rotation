@@ -40,7 +40,7 @@ from .utils import (
 )
 
 
-def run_setup(config: dict, config_path: str, encrypted: bool = False) -> bool:
+def run_setup(config: dict, config_path: str, encrypted: bool = False, api_version: str = "v1") -> bool:
     """
     Run the initial key pair setup process.
     
@@ -55,6 +55,7 @@ def run_setup(config: dict, config_path: str, encrypted: bool = False) -> bool:
         config: Configuration dictionary
         config_path: Path to the configuration file (for auto-saving destination_id)
         encrypted: Whether to use encrypted private key
+        api_version: Hevo API version ('v1' for production, 'v2.0' for testing)
         
     Returns:
         True if setup successful, False otherwise
@@ -166,12 +167,13 @@ def run_setup(config: dict, config_path: str, encrypted: bool = False) -> bool:
         print_success("RSA public key set successfully in Snowflake")
         
         # Step 4: Create Hevo destination
-        print_step(4, "Creating Hevo destination with key-pair authentication")
+        print_step(4, f"Creating Hevo destination with key-pair authentication (API {api_version})")
         
         hevo_client = HevoClient(
             base_url=hevo_config['base_url'],
             username=hevo_config['username'],
-            password=hevo_config['password']
+            password=hevo_config['password'],
+            api_version=api_version
         )
         
         result = hevo_client.create_destination(
@@ -224,7 +226,7 @@ def run_setup(config: dict, config_path: str, encrypted: bool = False) -> bool:
         return False
 
 
-def run_rotate(config: dict, config_path: str, encrypted: bool = False) -> bool:
+def run_rotate(config: dict, config_path: str, encrypted: bool = False, api_version: str = "v1") -> bool:
     """
     Run the key rotation process.
     
@@ -240,6 +242,7 @@ def run_rotate(config: dict, config_path: str, encrypted: bool = False) -> bool:
         config: Configuration dictionary
         config_path: Path to the configuration file
         encrypted: Whether to use encrypted private key
+        api_version: Hevo API version ('v1' for production, 'v2.0' for testing)
         
     Returns:
         True if rotation successful, False otherwise
@@ -375,12 +378,13 @@ def run_rotate(config: dict, config_path: str, encrypted: bool = False) -> bool:
         print_success(f"New key set in RSA_PUBLIC_KEY{'_2' if new_key_slot == 2 else ''} successfully")
         
         # Step 6: Update Hevo destination with new private key
-        print_step(6, f"Updating Hevo destination (ID: {destination_id}) with new private key")
+        print_step(6, f"Updating Hevo destination (ID: {destination_id}) with new private key (API {api_version})")
         
         hevo_client = HevoClient(
             base_url=hevo_config['base_url'],
             username=hevo_config['username'],
-            password=hevo_config['password']
+            password=hevo_config['password'],
+            api_version=api_version
         )
         
         hevo_client.update_destination(
@@ -464,7 +468,7 @@ def run_rotate(config: dict, config_path: str, encrypted: bool = False) -> bool:
         return False
 
 
-def run_update_keys(config: dict, config_path: str, encrypted: bool = False) -> bool:
+def run_update_keys(config: dict, config_path: str, encrypted: bool = False, api_version: str = "v1") -> bool:
     """
     Update keys for an existing Hevo destination.
     
@@ -481,6 +485,7 @@ def run_update_keys(config: dict, config_path: str, encrypted: bool = False) -> 
         config: Configuration dictionary
         config_path: Path to the configuration file
         encrypted: Whether to use encrypted private key
+        api_version: Hevo API version ('v1' for production, 'v2.0' for testing)
         
     Returns:
         True if update successful, False otherwise
@@ -587,12 +592,13 @@ def run_update_keys(config: dict, config_path: str, encrypted: bool = False) -> 
         print_success("RSA public key set successfully in Snowflake")
         
         # Step 5: Update Hevo destination with private key
-        print_step(4, f"Updating Hevo destination (ID: {destination_id}) with private key")
+        print_step(4, f"Updating Hevo destination (ID: {destination_id}) with private key (API {api_version})")
         
         hevo_client = HevoClient(
             base_url=hevo_config['base_url'],
             username=hevo_config['username'],
-            password=hevo_config['password']
+            password=hevo_config['password'],
+            api_version=api_version
         )
         
         hevo_client.update_destination(
@@ -942,6 +948,15 @@ EXAMPLES:
             help='Logging level (default: INFO)'
         )
     
+    # Add Hevo API version argument to commands that interact with Hevo
+    for subparser in [setup_parser, update_parser, rotate_parser]:
+        subparser.add_argument(
+            '--api-version',
+            choices=['v1', 'v2.0'],
+            default='v1',
+            help='Hevo API version: v1 (production, default) or v2.0 (testing)'
+        )
+    
     args = parser.parse_args()
     
     # Set up logging
@@ -970,11 +985,11 @@ EXAMPLES:
     success = False
     
     if args.command == 'setup':
-        success = run_setup(config, config_path=args.config, encrypted=args.encrypted)
+        success = run_setup(config, config_path=args.config, encrypted=args.encrypted, api_version=args.api_version)
     elif args.command == 'rotate':
-        success = run_rotate(config, config_path=args.config, encrypted=args.encrypted)
+        success = run_rotate(config, config_path=args.config, encrypted=args.encrypted, api_version=args.api_version)
     elif args.command == 'update-keys':
-        success = run_update_keys(config, config_path=args.config, encrypted=args.encrypted)
+        success = run_update_keys(config, config_path=args.config, encrypted=args.encrypted, api_version=args.api_version)
     elif args.command == 'snowflake-only':
         success = run_snowflake_only(config, config_path=args.config, encrypted=args.encrypted)
     

@@ -21,15 +21,21 @@ class HevoClient:
     
     Provides methods to create and update Snowflake destinations
     with key-pair authentication support.
+    
+    Supports two API versions:
+    - v1 (Production): /api/v1/destinations
+    - v2.0 (Testing): /api/public/v2.0/destinations
     """
     
-    API_VERSION = "v1"
+    # Supported API versions
+    SUPPORTED_VERSIONS = ["v1", "v2.0"]
     
     def __init__(
         self,
         base_url: str,
         username: str,
-        password: str
+        password: str,
+        api_version: str = "v1"
     ):
         """
         Initialize the Hevo API client.
@@ -38,6 +44,7 @@ class HevoClient:
             base_url: Hevo API base URL (e.g., 'https://us.hevodata.com')
             username: Hevo account username for Basic Auth
             password: Hevo account password for Basic Auth
+            api_version: API version to use ('v1' for production, 'v2.0' for testing)
         """
         self.base_url = base_url.rstrip('/')
         self.auth = HTTPBasicAuth(username, password)
@@ -45,6 +52,10 @@ class HevoClient:
             'Accept': 'application/json',
             'Content-Type': 'application/json'
         }
+        
+        if api_version not in self.SUPPORTED_VERSIONS:
+            raise ValueError(f"Unsupported API version: {api_version}. Supported: {self.SUPPORTED_VERSIONS}")
+        self.api_version = api_version
     
     def _get_url(self, endpoint: str) -> str:
         """
@@ -56,7 +67,9 @@ class HevoClient:
         Returns:
             Full URL string
         """
-        return f"{self.base_url}/api/{self.API_VERSION}/{endpoint.lstrip('/')}"
+        if self.api_version == "v2.0":
+            return f"{self.base_url}/api/public/v2.0/{endpoint.lstrip('/')}"
+        return f"{self.base_url}/api/v1/{endpoint.lstrip('/')}"
     
     def _handle_response(self, response: requests.Response) -> Dict[str, Any]:
         """
@@ -84,6 +97,87 @@ class HevoClient:
         
         return data
     
+    def _extract_account_name(self, account_url: str) -> str:
+        """
+        Extract account name from Snowflake account URL.
+        
+        Args:
+            account_url: Full account URL (e.g., 'account.snowflakecomputing.com')
+            
+        Returns:
+            Account name/identifier
+        """
+        # Remove protocol if present
+        account = account_url.replace('https://', '').replace('http://', '')
+        # Remove .snowflakecomputing.com suffix if present
+        account = account.replace('.snowflakecomputing.com', '')
+        return account
+    
+    def _build_create_payload(
+        self,
+        name: str,
+        account_url: str,
+        warehouse: str,
+        database_name: str,
+        database_user: str,
+        private_key: str,
+        private_key_passphrase: Optional[str] = None,
+        connector_id: str = "snowflake"
+    ) -> Dict[str, Any]:
+        """
+        Build the create destination payload based on API version.
+        
+        v1 (Production) schema:
+            - destination_type, account_url, database_name, database_user, PRIVATE_KEY
+            
+        v2.0 (Testing) schema:
+            - type, account_name, db_name, db_user, KEY_PAIR
+        """
+        # Strip leading/trailing whitespace from private key
+        clean_private_key = private_key.strip() if private_key else private_key
+        
+        if self.api_version == "v2.0":
+            # v2.0 API schema (Testing)
+            config = {
+                "authentication_type": "KEY_PAIR",
+                "account_name": self._extract_account_name(account_url),
+                "warehouse": warehouse,
+                "db_name": database_name,
+                "db_user": database_user,
+                "private_key": clean_private_key
+            }
+            
+            if private_key_passphrase:
+                config["private_key_passphrase"] = private_key_passphrase
+            
+            payload = {
+                "type": "SNOWFLAKE",
+                "config": config,
+                "name": name
+            }
+        else:
+            # v1 API schema (Production)
+            config = {
+                "authentication_type": "PRIVATE_KEY",
+                "account_url": account_url,
+                "warehouse": warehouse,
+                "database_name": database_name,
+                "database_user": database_user,
+                "private_key": clean_private_key
+            }
+            
+            if private_key_passphrase:
+                config["private_key_passphrase"] = private_key_passphrase
+            
+            payload = {
+                "destination_type": "SNOWFLAKE",
+                "config": config,
+                "connector_id": connector_id,
+                "name": name
+            }
+        
+        return payload
+    
     def create_destination(
         self,
         name: str,
@@ -106,7 +200,7 @@ class HevoClient:
             database_user: Snowflake username
             private_key: Private key content (PEM format)
             private_key_passphrase: Passphrase if key is encrypted
-            connector_id: Connector type (default: 'snowflake')
+            connector_id: Connector type (default: 'snowflake', used in v1 only)
             
         Returns:
             API response containing destination details including ID
@@ -114,28 +208,16 @@ class HevoClient:
         Raises:
             HevoClientError: If destination creation fails
         """
-        # Strip leading/trailing whitespace from private key
-        # Hevo API rejects keys with extra whitespace
-        clean_private_key = private_key.strip() if private_key else private_key
-        
-        config = {
-            "authentication_type": "PRIVATE_KEY",
-            "account_url": account_url,
-            "warehouse": warehouse,
-            "database_name": database_name,
-            "database_user": database_user,
-            "private_key": clean_private_key
-        }
-        
-        if private_key_passphrase:
-            config["private_key_passphrase"] = private_key_passphrase
-        
-        payload = {
-            "destination_type": "SNOWFLAKE",
-            "config": config,
-            "connector_id": connector_id,
-            "name": name
-        }
+        payload = self._build_create_payload(
+            name=name,
+            account_url=account_url,
+            warehouse=warehouse,
+            database_name=database_name,
+            database_user=database_user,
+            private_key=private_key,
+            private_key_passphrase=private_key_passphrase,
+            connector_id=connector_id
+        )
         
         url = self._get_url("destinations")
         
@@ -147,10 +229,52 @@ class HevoClient:
                 auth=self.auth
             )
             result = self._handle_response(response)
-            print(f"Successfully created destination: {name}")
+            print(f"Successfully created destination: {name} (API {self.api_version})")
             return result
         except requests.RequestException as e:
             raise HevoClientError(f"Request failed: {e}")
+    
+    def _build_update_payload(
+        self,
+        private_key: str,
+        private_key_passphrase: Optional[str] = None,
+        connector_id: str = "snowflake"
+    ) -> Dict[str, Any]:
+        """
+        Build the update destination payload based on API version.
+        """
+        # Strip leading/trailing whitespace from private key
+        clean_private_key = private_key.strip() if private_key else private_key
+        
+        if self.api_version == "v2.0":
+            # v2.0 API schema (Testing)
+            config = {
+                "authentication_type": "KEY_PAIR",
+                "private_key": clean_private_key
+            }
+            
+            if private_key_passphrase:
+                config["private_key_passphrase"] = private_key_passphrase
+            
+            payload = {
+                "config": config
+            }
+        else:
+            # v1 API schema (Production)
+            config = {
+                "authentication_type": "PRIVATE_KEY",
+                "private_key": clean_private_key
+            }
+            
+            if private_key_passphrase:
+                config["private_key_passphrase"] = private_key_passphrase
+            
+            payload = {
+                "config": config,
+                "connector_id": connector_id
+            }
+        
+        return payload
     
     def update_destination(
         self,
@@ -168,7 +292,7 @@ class HevoClient:
             destination_id: ID of the destination to update
             private_key: New private key content (PEM format)
             private_key_passphrase: Passphrase if key is encrypted
-            connector_id: Connector type (default: 'snowflake')
+            connector_id: Connector type (default: 'snowflake', used in v1 only)
             
         Returns:
             API response with update confirmation
@@ -176,22 +300,11 @@ class HevoClient:
         Raises:
             HevoClientError: If destination update fails
         """
-        # Strip leading/trailing whitespace from private key
-        # Hevo API rejects keys with extra whitespace
-        clean_private_key = private_key.strip() if private_key else private_key
-        
-        config = {
-            "authentication_type": "PRIVATE_KEY",
-            "private_key": clean_private_key
-        }
-        
-        if private_key_passphrase:
-            config["private_key_passphrase"] = private_key_passphrase
-        
-        payload = {
-            "config": config,
-            "connector_id": connector_id
-        }
+        payload = self._build_update_payload(
+            private_key=private_key,
+            private_key_passphrase=private_key_passphrase,
+            connector_id=connector_id
+        )
         
         url = self._get_url(f"destinations/{destination_id}")
         
@@ -203,7 +316,7 @@ class HevoClient:
                 auth=self.auth
             )
             result = self._handle_response(response)
-            print(f"Successfully updated destination: {destination_id}")
+            print(f"Successfully updated destination: {destination_id} (API {self.api_version})")
             return result
         except requests.RequestException as e:
             raise HevoClientError(f"Request failed: {e}")

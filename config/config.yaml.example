@@ -21,11 +21,19 @@ snowflake:
 
 # Hevo Data Configuration
 hevo:
-  # Hevo API base URL (varies by region)
-  # Examples:
+  # Hevo API base URL (varies by region and environment)
+  #
+  # PRODUCTION (v1 API - default):
   #   - US: https://us.hevodata.com
   #   - EU: https://eu.hevodata.com
   #   - IN: https://in.hevodata.com
+  #
+  # TESTING (v2.0 API):
+  #   - Testing/Staging: https://s-weasel.hevo.me (or your testing URL)
+  #
+  # Note: Use --api-version flag to switch between v1 (production) and v2.0 (testing)
+  #   sf-rotation setup --config config.yaml                    # Uses v1 (default)
+  #   sf-rotation setup --config config.yaml --api-version v2.0 # Uses v2.0
   base_url: "https://us.hevodata.com"
   
   # Hevo account credentials for Basic Auth
